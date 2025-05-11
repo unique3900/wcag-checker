@@ -24,7 +24,7 @@ async function ensureBrowsersInstalled() {
     console.log('Chromium not found, attempting to install browsers...')
     try {
       // Install browsers
-      await execAsync('npx playwright install chromium')
+      await execAsync('pnpx playwright install chromium')
       return true
     } catch (installError) {
       console.error('Failed to install browsers:', installError)
