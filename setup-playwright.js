@@ -4,7 +4,7 @@ console.log('Installing Playwright dependencies...');
 
 try {
   // Install Playwright browsers
-  execSync('pnpx playwright install chromium', { stdio: 'inherit' });
+  execSync('pnpx playwright-core install chromium', { stdio: 'inherit' });
   console.log('Playwright dependencies installed successfully!');
 } catch (error) {
   console.error('Failed to install Playwright dependencies:', error);
