@@ -8,7 +8,7 @@ import * as ExcelJS from 'exceljs'
 import * as fs from 'fs/promises'
 import * as path from 'path'
 
-// In-memory storage for scan results (since we're not using a database)
+// In-memory storage for results
 let scanResults: ScanResult[] = []
 let screenshotPaths: string[] = [];
 
@@ -23,7 +23,6 @@ export async function addUrlsForAnalysis(
   },
 ): Promise<{ success: boolean; count: number; errors?: string[] }> {
   try {
-    // Validate URLs
     const validUrls = urls.filter((url) => {
       try {
         new URL(url)
@@ -37,16 +36,13 @@ export async function addUrlsForAnalysis(
       throw new Error("No valid URLs provided")
     }
 
-    // Clear previous results
     scanResults = []
     screenshotPaths = []
     
     const errors: string[] = []
 
-    // Analyze each URL
     for (const url of validUrls) {
       try {
-        // Try simple analysis first
         let simpleResults;
         try {
           simpleResults = await simpleAnalyze(url, complianceOptions)
@@ -70,10 +66,8 @@ export async function addUrlsForAnalysis(
           playwrightResults = { results: [], summary: { critical: 0, serious: 0, moderate: 0, minor: 0, total: 0, urlsAnalyzed: 0 } }
         }
         
-        // Combine results, avoiding duplicates by using a Map with issue IDs as keys
         const combinedResultsMap = new Map<string, AccessibilityResult>()
         
-        // Add simple results to map
         simpleResults.results.forEach(result => {
           combinedResultsMap.set(result.id, result)
         })
@@ -83,10 +77,8 @@ export async function addUrlsForAnalysis(
           combinedResultsMap.set(result.id, result)
         })
         
-        // Convert map back to array
         const combinedResults = Array.from(combinedResultsMap.values())
         
-        // Calculate combined summary
         const summary = {
           critical: combinedResults.filter((r) => r.severity === "critical").length,
           serious: combinedResults.filter((r) => r.severity === "serious").length,
@@ -126,13 +118,12 @@ export async function getAccessibilityResults(params: ResultsQueryParams) {
   const skip = (page - 1) * pageSize
 
   try {
-    // Flatten all results from all URLs
     let allResults: AccessibilityResult[] = []
     scanResults.forEach((scan) => {
       allResults = [...allResults, ...scan.results]
     })
 
-    // Apply search filter if provided
+    // Apply search filter if selected
     let filteredResults = allResults
     if (search) {
       const searchLower = search.toLowerCase()
@@ -147,7 +138,7 @@ export async function getAccessibilityResults(params: ResultsQueryParams) {
       )
     }
 
-    // Apply severity filters if provided
+    // Apply severity filters if selected
     if (severityFilters && severityFilters.length > 0) {
       filteredResults = filteredResults.filter(result => 
         severityFilters.includes(result.severity)
@@ -161,7 +152,7 @@ export async function getAccessibilityResults(params: ResultsQueryParams) {
       )
     }
 
-    // Apply sorting
+    //  sorting
     const sortedResults = [...filteredResults].sort((a, b) => {
       switch (sortBy) {
         case "severity":
