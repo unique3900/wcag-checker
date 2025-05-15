@@ -235,7 +235,7 @@ export function ResultsTable() {
               <Filter className="mr-2 h-4 w-4" />
               Compliance
               {complianceFilters.length > 0 && (
-                <Badge className="ml-2 bg-primary" variant="secondary">
+                <Badge className="ml-2 bg-green-500" variant="secondary">
                   {complianceFilters.length}
                 </Badge>
               )}
