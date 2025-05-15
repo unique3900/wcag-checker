@@ -1,9 +1,5 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>WCAG Accessibility Checker</title>
-</head>
 <body>
 
   <h1>WCAG Accessibility Checker</h1>
