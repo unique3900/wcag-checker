@@ -1,0 +1,79 @@
+# WCAG Accessibility Checker
+
+A lightweight web accessibility checker that analyzes websites for WCAG compliance using puppeteer-core and @sparticuz/chromium.
+
+## Features
+
+- Lightweight implementation with bundle size under 50MB
+- Serverless compatible with @sparticuz/chromium
+- Comprehensive WCAG accessibility testing
+- Screenshot capture of accessibility issues
+- Export results to Excel
+- Detailed reporting and issue prioritization
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 18.x or later
+- npm or yarn
+
+### Installation
+
+1. Clone the repository
+```bash
+git clone https://github.com/yourusername/wcag-checker.git
+cd wcag-checker
+```
+
+2. Install dependencies
+```bash
+npm install
+# or
+yarn install
+```
+
+3. Run the development server
+```bash
+npm run dev
+# or
+yarn dev
+```
+
+4. Open [http://localhost:3000](http://localhost:3000) in your browser
+
+## Using in Production (Serverless)
+
+This tool is optimized for serverless environments using `@sparticuz/chromium` and `puppeteer-core`. The implementation automatically detects the environment and uses the appropriate browser configuration.
+
+For AWS Lambda or other serverless deployments, no additional configuration is needed as the code automatically uses the lightweight Chromium build.
+
+## Compliance Standards
+
+The tool supports the following compliance standards:
+
+- WCAG 2.0/2.1 Level A
+- WCAG 2.0/2.1 Level AA
+- WCAG 2.0/2.1 Level AAA
+- Section 508
+- Best Practices
+
+## Implementation Details
+
+- Uses puppeteer-core instead of full Puppeteer to reduce bundle size
+- Implements @sparticuz/chromium for serverless environments
+- Automatically detects the runtime environment to use the appropriate browser configuration
+- Combines results from multiple analysis methods for comprehensive testing
+
+## Bundle Size Optimization
+
+The implementation is optimized to keep the bundle size under 50MB by:
+
+1. Using puppeteer-core instead of full Puppeteer
+2. Using @sparticuz/chromium which is a lightweight Chromium build
+3. Loading browser only when needed
+4. Avoiding large dependencies
+
+## License
+
+MIT 
