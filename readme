@@ -1,79 +1,85 @@
-# WCAG Accessibility Checker
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>WCAG Accessibility Checker</title>
+</head>
+<body>
 
-A lightweight web accessibility checker that analyzes websites for WCAG compliance using puppeteer-core and @sparticuz/chromium.
+  <h1>WCAG Accessibility Checker</h1>
 
-## Features
+  <p>A lightweight web accessibility checker that analyzes websites for WCAG compliance using <code>puppeteer-core</code> and <code>@sparticuz/chromium</code>.</p>
 
-- Lightweight implementation with bundle size under 50MB
-- Serverless compatible with @sparticuz/chromium
-- Comprehensive WCAG accessibility testing
-- Screenshot capture of accessibility issues
-- Export results to Excel
-- Detailed reporting and issue prioritization
+  <h2>Features</h2>
+  <ul>
+    <li>Lightweight implementation with bundle size under 50MB</li>
+    <li>Serverless compatible with @sparticuz/chromium</li>
+    <li>Comprehensive WCAG accessibility testing</li>
+    <li>Screenshot capture of accessibility issues</li>
+    <li>Export results to Excel</li>
+    <li>Detailed reporting and issue prioritization</li>
+  </ul>
 
-## Getting Started
+  <h2>Getting Started</h2>
 
-### Prerequisites
+  <h3>Prerequisites</h3>
+  <ul>
+    <li>Node.js 18.x or later</li>
+    <li>npm or yarn</li>
+  </ul>
 
-- Node.js 18.x or later
-- npm or yarn
-
-### Installation
-
-1. Clone the repository
-```bash
-git clone https://github.com/yourusername/wcag-checker.git
-cd wcag-checker
-```
-
-2. Install dependencies
-```bash
-npm install
+  <h3>Installation</h3>
+  <ol>
+    <li>Clone the repository
+      <pre><code>git clone https://github.com/yourusername/wcag-checker.git
+cd wcag-checker</code></pre>
+    </li>
+    <li>Install dependencies
+      <pre><code>npm install
 # or
-yarn install
-```
-
-3. Run the development server
-```bash
-npm run dev
+yarn install</code></pre>
+    </li>
+    <li>Run the development server
+      <pre><code>npm run dev
 # or
-yarn dev
-```
+yarn dev</code></pre>
+    </li>
+    <li>Open <a href="http://localhost:3000">http://localhost:3000</a> in your browser</li>
+  </ol>
 
-4. Open [http://localhost:3000](http://localhost:3000) in your browser
+  <h2>Using in Production (Serverless)</h2>
+  <p>This tool is optimized for serverless environments using <code>@sparticuz/chromium</code> and <code>puppeteer-core</code>. The implementation automatically detects the environment and uses the appropriate browser configuration.</p>
+  <p>For AWS Lambda or other serverless deployments, no additional configuration is needed as the code automatically uses the lightweight Chromium build.</p>
 
-## Using in Production (Serverless)
+  <h2>Compliance Standards</h2>
+  <p>The tool supports the following compliance standards:</p>
+  <ul>
+    <li>WCAG 2.0/2.1 Level A</li>
+    <li>WCAG 2.0/2.1 Level AA</li>
+    <li>WCAG 2.0/2.1 Level AAA</li>
+    <li>Section 508</li>
+    <li>Best Practices</li>
+  </ul>
 
-This tool is optimized for serverless environments using `@sparticuz/chromium` and `puppeteer-core`. The implementation automatically detects the environment and uses the appropriate browser configuration.
+  <h2>Implementation Details</h2>
+  <ul>
+    <li>Uses <code>puppeteer-core</code> instead of full Puppeteer to reduce bundle size</li>
+    <li>Implements <code>@sparticuz/chromium</code> for serverless environments</li>
+    <li>Automatically detects the runtime environment to use the appropriate browser configuration</li>
+    <li>Combines results from multiple analysis methods for comprehensive testing</li>
+  </ul>
 
-For AWS Lambda or other serverless deployments, no additional configuration is needed as the code automatically uses the lightweight Chromium build.
+  <h2>Bundle Size Optimization</h2>
+  <p>The implementation is optimized to keep the bundle size under 50MB by:</p>
+  <ol>
+    <li>Using <code>puppeteer-core</code> instead of full Puppeteer</li>
+    <li>Using <code>@sparticuz/chromium</code> which is a lightweight Chromium build</li>
+    <li>Loading browser only when needed</li>
+    <li>Avoiding large dependencies</li>
+  </ol>
 
-## Compliance Standards
+  <h2>License</h2>
+  <p>MIT</p>
 
-The tool supports the following compliance standards:
-
-- WCAG 2.0/2.1 Level A
-- WCAG 2.0/2.1 Level AA
-- WCAG 2.0/2.1 Level AAA
-- Section 508
-- Best Practices
-
-## Implementation Details
-
-- Uses puppeteer-core instead of full Puppeteer to reduce bundle size
-- Implements @sparticuz/chromium for serverless environments
-- Automatically detects the runtime environment to use the appropriate browser configuration
-- Combines results from multiple analysis methods for comprehensive testing
-
-## Bundle Size Optimization
-
-The implementation is optimized to keep the bundle size under 50MB by:
-
-1. Using puppeteer-core instead of full Puppeteer
-2. Using @sparticuz/chromium which is a lightweight Chromium build
-3. Loading browser only when needed
-4. Avoiding large dependencies
-
-## License
-
-MIT 
+</body>
+</html>
