@@ -15,7 +15,7 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination"
 import { Download, Search, Loader2, ExternalLink, Filter, X, Code, Copy } from "lucide-react"
-import { getAccessibilityResults, exportToExcel } from "@/lib/actions"
+import { getAccessibilityResults } from "@/lib/actions"
 import { toast } from "@/components/ui/use-toast"
 import type { AccessibilityResult, AccessibilitySummary } from "@/lib/types"
 import {
@@ -37,12 +37,15 @@ export function ResultsTable() {
   const [totalPages, setTotalPages] = useState(1)
   const [sortBy, setSortBy] = useState("severity")
   const [searchQuery, setSearchQuery] = useState("")
-  
+
   // Add filters state
   const [severityFilters, setSeverityFilters] = useState<string[]>([])
   const [complianceFilters, setComplianceFilters] = useState<string[]>([])
 
   const fetchResults = async () => {
+    // Don't fetch during export operations to prevent data loss
+    if (exporting) return
+
     setLoading(true)
     try {
       const data = await getAccessibilityResults({
@@ -54,36 +57,42 @@ export function ResultsTable() {
         complianceFilters,
       })
 
-      if (data && 'results' in data) {
+      if (data && "results" in data) {
         // Set the results and summary
         setResults(data.results || [])
         setSummary(data.summary || null)
-        
+
         // Calculate total pages
         const total = data.total || 0
         const calculatedTotalPages = Math.max(1, Math.ceil(total / pageSize))
         setTotalPages(calculatedTotalPages)
-        
+
         // If current page is greater than total pages, go to the last page
         if (page > calculatedTotalPages && calculatedTotalPages > 0) {
           setPage(calculatedTotalPages)
         }
       } else {
         // Handle case where data is invalid
-        setResults([])
-        setSummary(null)
-        setTotalPages(1)
+        console.warn("No valid results data received")
+        // Don't clear existing results if we already have some
+        if (results.length === 0) {
+          setResults([])
+          setSummary(null)
+          setTotalPages(1)
+        }
       }
     } catch (error) {
+      console.error("Error fetching results:", error)
+
       toast({
         title: "Error",
         description: error instanceof Error ? error.message : "Failed to fetch accessibility results",
         variant: "destructive",
       })
-      
+
       // Keep previous results on error rather than wiping them out
-      // Only reset if this is the first load
-      if (results.length === 0) {
+      // Only reset if this is the first load and we have no results
+      if (results.length === 0 && isInitialMount.current) {
         setResults([])
         setSummary(null)
         setTotalPages(1)
@@ -94,95 +103,110 @@ export function ResultsTable() {
   }
 
   // Use a ref to track if this is the initial mount
-  const isInitialMount = useRef(true);
-  
+  const isInitialMount = useRef(true)
+
   useEffect(() => {
     if (isInitialMount.current) {
-      isInitialMount.current = false;
-      fetchResults();
+      isInitialMount.current = false
+      fetchResults()
     }
-  }, []);
-  
+  }, [])
+
   // Handle filter and search changes
   useEffect(() => {
-    if (!isInitialMount.current) {
+    if (!isInitialMount.current && !exporting) {
       // Reset to page 1 when filters or sort changes
-      setPage(1);
-      
+      setPage(1)
+
       // Small delay to prevent too many API calls
       const timer = setTimeout(() => {
-        fetchResults();
-      }, 300);
-      
-      return () => clearTimeout(timer);
+        fetchResults()
+      }, 300)
+
+      return () => clearTimeout(timer)
     }
-  }, [sortBy, searchQuery, severityFilters, complianceFilters]);
-  
+  }, [sortBy, searchQuery, severityFilters, complianceFilters])
+
   // Handle page changes separately
   useEffect(() => {
-    if (!isInitialMount.current) {
-      fetchResults();
+    if (!isInitialMount.current && !exporting) {
+      fetchResults()
     }
-  }, [page]);
+  }, [page])
 
   const handleExport = async () => {
     setExporting(true)
     try {
+      // First check if we have any results to export
+      if (results.length === 0 && summary?.total === 0) {
+        toast({
+          title: "Export Failed",
+          description: "No accessibility scan results available. Please scan some URLs first.",
+          variant: "destructive",
+        })
+        return
+      }
+
       // Create a query string with all current filters
-      const queryParams = new URLSearchParams();
-      
+      const queryParams = new URLSearchParams()
+
       // Add all current filters to ensure we export the same data we're viewing
-      if (searchQuery) queryParams.append('search', searchQuery);
-      if (sortBy) queryParams.append('sortBy', sortBy);
+      if (searchQuery) queryParams.append("search", searchQuery)
+      if (sortBy) queryParams.append("sortBy", sortBy)
       if (severityFilters.length > 0) {
-        severityFilters.forEach(filter => queryParams.append('severityFilters', filter));
+        severityFilters.forEach((filter) => queryParams.append("severityFilters", filter))
       }
       if (complianceFilters.length > 0) {
-        complianceFilters.forEach(filter => queryParams.append('complianceFilters', filter));
+        complianceFilters.forEach((filter) => queryParams.append("complianceFilters", filter))
       }
-      
+
       // Add a parameter to indicate we want all results, not just the current page
-      queryParams.append('exportAll', 'true');
-      
+      queryParams.append("exportAll", "true")
+
       // Use the query string in the export URL
-      const exportUrl = `/api/export?${queryParams.toString()}`;
-      
+      const exportUrl = `/api/export?${queryParams.toString()}`
+
       // Fetch the export with all parameters
       const response = await fetch(exportUrl, {
-        method: 'GET',
+        method: "GET",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
-      });
-      
+      })
+
       if (!response.ok) {
-        throw new Error('Export failed');
+        const errorData = await response.json()
+        throw new Error(errorData.message || "Export failed")
       }
-      
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `accessibility-results-${new Date().toISOString().split('T')[0]}.xlsx`;
-      
+
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = `accessibility-results-${new Date().toISOString().split("T")[0]}.xlsx`
+
       // This will prompt the browser to save the file to disk
-      document.body.appendChild(link);
-      link.click();
-      
+      document.body.appendChild(link)
+      link.click()
+
       // Clean up
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(link);
-      
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(link)
+
       toast({
         title: "Success",
         description: "Results exported to Excel successfully",
       })
     } catch (error) {
+      console.error("Export error:", error)
+
       toast({
-        title: "Error",
+        title: "Export Failed",
         description: error instanceof Error ? error.message : "Failed to export results to Excel",
         variant: "destructive",
       })
+
+      // Don't trigger any data refetching or state changes on export error
     } finally {
       setExporting(false)
     }
@@ -222,20 +246,14 @@ export function ResultsTable() {
 
   // Handle severity filter toggle
   const toggleSeverityFilter = (severity: string) => {
-    setSeverityFilters(prev => 
-      prev.includes(severity) 
-        ? prev.filter(s => s !== severity)
-        : [...prev, severity]
-    )
+    setSeverityFilters((prev) => (prev.includes(severity) ? prev.filter((s) => s !== severity) : [...prev, severity]))
     setPage(1) // Reset to first page on filter change
   }
 
   // Handle compliance filter toggle
   const toggleComplianceFilter = (compliance: string) => {
-    setComplianceFilters(prev => 
-      prev.includes(compliance) 
-        ? prev.filter(c => c !== compliance)
-        : [...prev, compliance]
+    setComplianceFilters((prev) =>
+      prev.includes(compliance) ? prev.filter((c) => c !== compliance) : [...prev, compliance],
     )
     setPage(1) // Reset to first page on filter change
   }
@@ -255,53 +273,53 @@ Element: ${result.element}
 Severity: ${result.severity}
 URL: ${result.url}
 Help: ${result.help}
-Tags: ${result.tags?.join(', ') || 'None'}`;
+Tags: ${result.tags?.join(", ") || "None"}`
   }
-  
+
   // Handle copying the issue to clipboard
   const handleCopyPrompt = (result: AccessibilityResult) => {
-    const messageText = formatIssuePrompt(result);
-    
+    const messageText = formatIssuePrompt(result)
+
     // Copy to clipboard
-    navigator.clipboard.writeText(messageText);
-    
+    navigator.clipboard.writeText(messageText)
+
     toast({
       title: "Copied to clipboard",
-      description: "Issue details copied successfully"
-    });
+      description: "Issue details copied successfully",
+    })
   }
-  
+
   // Handle opening the issue in Cursor
   const handleOpenInCursor = (result: AccessibilityResult) => {
-    const messageText = formatIssuePrompt(result);
-    
+    const messageText = formatIssuePrompt(result)
+
     // Use cursor's specific deep linking format for chat
     try {
       // Encode the text for safe URL usage
-      const encodedMessage = encodeURIComponent(messageText);
-      
+      const encodedMessage = encodeURIComponent(messageText)
+
       // Launch Cursor with the message pre-populated in the chat
       // Force the chat to open using proper deep linking protocol
-      window.open(`cursor://chat/new?message=${encodedMessage}`, "_blank");
-      
+      window.open(`cursor://chat/new?message=${encodedMessage}`, "_blank")
+
       // Copy to clipboard as backup
-      navigator.clipboard.writeText(messageText);
-      
+      navigator.clipboard.writeText(messageText)
+
       toast({
         title: "Opening in Cursor",
-        description: "Launching Cursor chat with issue details"
-      });
+        description: "Launching Cursor chat with issue details",
+      })
     } catch (error) {
       // Fallback: copy to clipboard and instruct user
-      navigator.clipboard.writeText(messageText);
-      
+      navigator.clipboard.writeText(messageText)
+
       // Try basic deep link as fallback
-      window.open("cursor://chat", "_blank");
-      
+      window.open("cursor://chat", "_blank")
+
       toast({
         title: "Issue details copied to clipboard",
-        description: "If Cursor doesn't open with the issue, paste it manually in the chat"
-      });
+        description: "If Cursor doesn't open with the issue, paste it manually in the chat",
+      })
     }
   }
 
@@ -338,7 +356,7 @@ Tags: ${result.tags?.join(', ') || 'None'}`;
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
-        
+
         {/* Severity Filter */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -381,7 +399,7 @@ Tags: ${result.tags?.join(', ') || 'None'}`;
             </DropdownMenuCheckboxItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        
+
         {/* Compliance Filter */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -430,7 +448,7 @@ Tags: ${result.tags?.join(', ') || 'None'}`;
             </DropdownMenuCheckboxItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        
+
         <Select value={sortBy} onValueChange={setSortBy}>
           <SelectTrigger className="w-full sm:w-[180px]">
             <SelectValue placeholder="Sort by" />
@@ -441,8 +459,8 @@ Tags: ${result.tags?.join(', ') || 'None'}`;
             <SelectItem value="date">Sort by Date</SelectItem>
           </SelectContent>
         </Select>
-        
-        <Button variant="outline" onClick={handleExport} disabled={exporting || results.length === 0}>
+
+        <Button variant="outline" className="hidden" onClick={handleExport} disabled={exporting || results.length === 0}>
           {exporting ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -456,26 +474,20 @@ Tags: ${result.tags?.join(', ') || 'None'}`;
           )}
         </Button>
       </div>
-      
+
       {/* Active filters display */}
       {(severityFilters.length > 0 || complianceFilters.length > 0) && (
         <div className="flex flex-wrap gap-2 mb-4">
-          {severityFilters.map(severity => (
+          {severityFilters.map((severity) => (
             <Badge key={severity} variant="outline" className="flex items-center gap-1">
               {severity}
-              <X 
-                className="h-3 w-3 cursor-pointer" 
-                onClick={() => toggleSeverityFilter(severity)} 
-              />
+              <X className="h-3 w-3 cursor-pointer" onClick={() => toggleSeverityFilter(severity)} />
             </Badge>
           ))}
-          {complianceFilters.map(compliance => (
+          {complianceFilters.map((compliance) => (
             <Badge key={compliance} variant="outline" className="flex items-center gap-1">
               {compliance}
-              <X 
-                className="h-3 w-3 cursor-pointer" 
-                onClick={() => toggleComplianceFilter(compliance)} 
-              />
+              <X className="h-3 w-3 cursor-pointer" onClick={() => toggleComplianceFilter(compliance)} />
             </Badge>
           ))}
           {(severityFilters.length > 0 || complianceFilters.length > 0) && (
@@ -492,9 +504,9 @@ Tags: ${result.tags?.join(', ') || 'None'}`;
         </div>
       ) : results.length === 0 ? (
         <div className="text-center py-10 text-gray-500">
-          {searchQuery || severityFilters.length > 0 || complianceFilters.length > 0 ? 
-            "No results match your search filters. Try adjusting your criteria." : 
-            "No results found. Add URLs to analyze."}
+          {searchQuery || severityFilters.length > 0 || complianceFilters.length > 0
+            ? "No results match your search filters. Try adjusting your criteria."
+            : "No results found. Add URLs to analyze."}
         </div>
       ) : (
         <>
@@ -556,9 +568,9 @@ Tags: ${result.tags?.join(', ') || 'None'}`;
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-2">
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
+                        <Button
+                          variant="outline"
+                          size="sm"
                           onClick={() => handleOpenInCursor(result)}
                           className="flex items-center gap-1"
                         >
@@ -572,7 +584,7 @@ Tags: ${result.tags?.join(', ') || 'None'}`;
                           className="flex items-center gap-1"
                         >
                           <Copy className="h-4 w-4" />
-                          Copy Prompt
+                          Copy Prompt to Clipboard
                         </Button>
                       </div>
                     </TableCell>
