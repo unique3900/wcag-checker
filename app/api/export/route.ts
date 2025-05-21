@@ -4,7 +4,26 @@ import * as fs from 'fs/promises'
 
 export async function GET(request: NextRequest) {
   try {
-    const result = await exportToExcel()
+    // Extract query parameters from the request
+    const searchParams = request.nextUrl.searchParams;
+    
+    // Parse query parameters
+    const search = searchParams.get('search') || '';
+    const sortBy = searchParams.get('sortBy') || 'severity';
+    const exportAll = searchParams.has('exportAll') ? true : false;
+    
+    // Handle array parameters (severityFilters and complianceFilters)
+    const severityFilters = searchParams.getAll('severityFilters');
+    const complianceFilters = searchParams.getAll('complianceFilters');
+    
+    // Pass the parameters to the exportToExcel function
+    const result = await exportToExcel({
+      search,
+      sortBy,
+      exportAll,
+      severityFilters,
+      complianceFilters
+    });
 
     if (!result.success || !result.filePath) {
       return NextResponse.json({ error: "Failed to generate Excel file" }, { status: 500 })

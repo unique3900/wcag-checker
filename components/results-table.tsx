@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -14,7 +14,7 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination"
-import { Download, Search, Loader2, ExternalLink, Filter, X } from "lucide-react"
+import { Download, Search, Loader2, ExternalLink, Filter, X, Code, Copy } from "lucide-react"
 import { getAccessibilityResults, exportToExcel } from "@/lib/actions"
 import { toast } from "@/components/ui/use-toast"
 import type { AccessibilityResult, AccessibilitySummary } from "@/lib/types"
@@ -54,29 +54,124 @@ export function ResultsTable() {
         complianceFilters,
       })
 
-      setResults(data.results)
-      setSummary(data.summary)
-      setTotalPages(Math.ceil(data.total / pageSize))
+      if (data && 'results' in data) {
+        // Set the results and summary
+        setResults(data.results || [])
+        setSummary(data.summary || null)
+        
+        // Calculate total pages
+        const total = data.total || 0
+        const calculatedTotalPages = Math.max(1, Math.ceil(total / pageSize))
+        setTotalPages(calculatedTotalPages)
+        
+        // If current page is greater than total pages, go to the last page
+        if (page > calculatedTotalPages && calculatedTotalPages > 0) {
+          setPage(calculatedTotalPages)
+        }
+      } else {
+        // Handle case where data is invalid
+        setResults([])
+        setSummary(null)
+        setTotalPages(1)
+      }
     } catch (error) {
       toast({
         title: "Error",
         description: error instanceof Error ? error.message : "Failed to fetch accessibility results",
         variant: "destructive",
       })
+      
+      // Keep previous results on error rather than wiping them out
+      // Only reset if this is the first load
+      if (results.length === 0) {
+        setResults([])
+        setSummary(null)
+        setTotalPages(1)
+      }
     } finally {
       setLoading(false)
     }
   }
 
+  // Use a ref to track if this is the initial mount
+  const isInitialMount = useRef(true);
+  
   useEffect(() => {
-    fetchResults()
-  }, [page, sortBy, searchQuery, severityFilters, complianceFilters])
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      fetchResults();
+    }
+  }, []);
+  
+  // Handle filter and search changes
+  useEffect(() => {
+    if (!isInitialMount.current) {
+      // Reset to page 1 when filters or sort changes
+      setPage(1);
+      
+      // Small delay to prevent too many API calls
+      const timer = setTimeout(() => {
+        fetchResults();
+      }, 300);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [sortBy, searchQuery, severityFilters, complianceFilters]);
+  
+  // Handle page changes separately
+  useEffect(() => {
+    if (!isInitialMount.current) {
+      fetchResults();
+    }
+  }, [page]);
 
   const handleExport = async () => {
     setExporting(true)
     try {
-      // Update to use the API route for download
-      window.location.href = '/api/export'
+      // Create a query string with all current filters
+      const queryParams = new URLSearchParams();
+      
+      // Add all current filters to ensure we export the same data we're viewing
+      if (searchQuery) queryParams.append('search', searchQuery);
+      if (sortBy) queryParams.append('sortBy', sortBy);
+      if (severityFilters.length > 0) {
+        severityFilters.forEach(filter => queryParams.append('severityFilters', filter));
+      }
+      if (complianceFilters.length > 0) {
+        complianceFilters.forEach(filter => queryParams.append('complianceFilters', filter));
+      }
+      
+      // Add a parameter to indicate we want all results, not just the current page
+      queryParams.append('exportAll', 'true');
+      
+      // Use the query string in the export URL
+      const exportUrl = `/api/export?${queryParams.toString()}`;
+      
+      // Fetch the export with all parameters
+      const response = await fetch(exportUrl, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        throw new Error('Export failed');
+      }
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `accessibility-results-${new Date().toISOString().split('T')[0]}.xlsx`;
+      
+      // This will prompt the browser to save the file to disk
+      document.body.appendChild(link);
+      link.click();
+      
+      // Clean up
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(link);
       
       toast({
         title: "Success",
@@ -149,6 +244,65 @@ export function ResultsTable() {
   const clearFilters = () => {
     setSeverityFilters([])
     setComplianceFilters([])
+  }
+
+  // Format accessibility issue as a prompt
+  const formatIssuePrompt = (result: AccessibilityResult) => {
+    return `Fix this accessibility issue:
+
+Issue: ${result.message}
+Element: ${result.element}
+Severity: ${result.severity}
+URL: ${result.url}
+Help: ${result.help}
+Tags: ${result.tags?.join(', ') || 'None'}`;
+  }
+  
+  // Handle copying the issue to clipboard
+  const handleCopyPrompt = (result: AccessibilityResult) => {
+    const messageText = formatIssuePrompt(result);
+    
+    // Copy to clipboard
+    navigator.clipboard.writeText(messageText);
+    
+    toast({
+      title: "Copied to clipboard",
+      description: "Issue details copied successfully"
+    });
+  }
+  
+  // Handle opening the issue in Cursor
+  const handleOpenInCursor = (result: AccessibilityResult) => {
+    const messageText = formatIssuePrompt(result);
+    
+    // Use cursor's specific deep linking format for chat
+    try {
+      // Encode the text for safe URL usage
+      const encodedMessage = encodeURIComponent(messageText);
+      
+      // Launch Cursor with the message pre-populated in the chat
+      // Force the chat to open using proper deep linking protocol
+      window.open(`cursor://chat/new?message=${encodedMessage}`, "_blank");
+      
+      // Copy to clipboard as backup
+      navigator.clipboard.writeText(messageText);
+      
+      toast({
+        title: "Opening in Cursor",
+        description: "Launching Cursor chat with issue details"
+      });
+    } catch (error) {
+      // Fallback: copy to clipboard and instruct user
+      navigator.clipboard.writeText(messageText);
+      
+      // Try basic deep link as fallback
+      window.open("cursor://chat", "_blank");
+      
+      toast({
+        title: "Issue details copied to clipboard",
+        description: "If Cursor doesn't open with the issue, paste it manually in the chat"
+      });
+    }
   }
 
   return (
@@ -338,7 +492,9 @@ export function ResultsTable() {
         </div>
       ) : results.length === 0 ? (
         <div className="text-center py-10 text-gray-500">
-          No results found. Add URLs to analyze or adjust your search filters.
+          {searchQuery || severityFilters.length > 0 || complianceFilters.length > 0 ? 
+            "No results match your search filters. Try adjusting your criteria." : 
+            "No results found. Add URLs to analyze."}
         </div>
       ) : (
         <>
@@ -351,6 +507,7 @@ export function ResultsTable() {
                   <TableHead>Severity</TableHead>
                   <TableHead className="hidden md:table-cell">Element</TableHead>
                   <TableHead className="hidden lg:table-cell">Compliance</TableHead>
+                  <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -397,41 +554,66 @@ export function ResultsTable() {
                         ))}
                       </div>
                     </TableCell>
+                    <TableCell>
+                      <div className="flex gap-2">
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          onClick={() => handleOpenInCursor(result)}
+                          className="flex items-center gap-1"
+                        >
+                          <Code className="h-4 w-4" />
+                          Fix in Cursor
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => handleCopyPrompt(result)}
+                          className="flex items-center gap-1"
+                        >
+                          <Copy className="h-4 w-4" />
+                          Copy Prompt
+                        </Button>
+                      </div>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
           </div>
 
-          <Pagination>
-            <PaginationContent>
-              <PaginationItem>
-                <PaginationPrevious
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  className={page <= 1 ? "pointer-events-none opacity-50" : ""}
-                />
-              </PaginationItem>
-              {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                const pageNumber = page <= 3 ? i + 1 : page >= totalPages - 2 ? totalPages - 4 + i : page - 2 + i
+          {/* Show pagination only if we have results and more than 1 page */}
+          {results.length > 0 && totalPages > 1 && (
+            <Pagination>
+              <PaginationContent>
+                <PaginationItem>
+                  <PaginationPrevious
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    className={page <= 1 ? "pointer-events-none opacity-50" : ""}
+                  />
+                </PaginationItem>
+                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                  const pageNumber = page <= 3 ? i + 1 : page >= totalPages - 2 ? totalPages - 4 + i : page - 2 + i
 
-                if (pageNumber <= 0 || pageNumber > totalPages) return null
+                  if (pageNumber <= 0 || pageNumber > totalPages) return null
 
-                return (
-                  <PaginationItem key={i}>
-                    <PaginationLink isActive={page === pageNumber} onClick={() => setPage(pageNumber)}>
-                      {pageNumber}
-                    </PaginationLink>
-                  </PaginationItem>
-                )
-              })}
-              <PaginationItem>
-                <PaginationNext
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  className={page >= totalPages ? "pointer-events-none opacity-50" : ""}
-                />
-              </PaginationItem>
-            </PaginationContent>
-          </Pagination>
+                  return (
+                    <PaginationItem key={i}>
+                      <PaginationLink isActive={page === pageNumber} onClick={() => setPage(pageNumber)}>
+                        {pageNumber}
+                      </PaginationLink>
+                    </PaginationItem>
+                  )
+                })}
+                <PaginationItem>
+                  <PaginationNext
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    className={page >= totalPages ? "pointer-events-none opacity-50" : ""}
+                  />
+                </PaginationItem>
+              </PaginationContent>
+            </Pagination>
+          )}
         </>
       )}
     </div>
