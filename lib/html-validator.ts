@@ -74,6 +74,47 @@ export async function analyzeAccessibility(
   }
 }
 
+// Enhanced helper function to generate CSS selector paths
+function generateElementPath(element: Element): string {
+  const path: string[] = []
+  let current: Element | null = element
+
+  while (current && current.nodeType === Node.ELEMENT_NODE) {
+    let selector = current.tagName.toLowerCase()
+
+    // Add ID if present (most specific)
+    if (current.id) {
+      selector += `#${current.id}`
+      path.unshift(selector)
+      break // ID is unique, we can stop here
+    }
+
+    // Add classes if present
+    if (current.className && typeof current.className === 'string') {
+      const classes = current.className.split(/\s+/).filter(cls => cls.length > 0)
+      if (classes.length > 0) {
+        selector += '.' + classes.join('.')
+      }
+    }
+
+    // Add nth-child if there are siblings with the same tag
+    if (current.parentElement) {
+      const siblings = Array.from(current.parentElement.children).filter(
+        sibling => sibling.tagName === current!.tagName
+      )
+      if (siblings.length > 1) {
+        const index = siblings.indexOf(current) + 1
+        selector += `:nth-child(${index})`
+      }
+    }
+
+    path.unshift(selector)
+    current = current.parentElement
+  }
+
+  return path.join(' > ')
+}
+
 // Helper functions for accessibility checks
 
 function checkImagesWithoutAlt(document: Document, url: string): AccessibilityResult[] {
@@ -88,6 +129,7 @@ function checkImagesWithoutAlt(document: Document, url: string): AccessibilityRe
         message: "Image missing alt attribute",
         help: "Images must have alternate text",
         element: img.outerHTML,
+        elementPath: generateElementPath(img),
         impact: "serious",
         severity: "serious",
         tags: ["wcag2a", "wcag2aa", "wcag2aaa", "section508"],
@@ -103,6 +145,7 @@ function checkImagesWithoutAlt(document: Document, url: string): AccessibilityRe
           message: "Image has empty alt attribute but is not marked as decorative",
           help: "Non-decorative images should have meaningful alt text",
           element: img.outerHTML,
+          elementPath: generateElementPath(img),
           impact: "moderate",
           severity: "moderate",
           tags: ["wcag2a", "wcag2aa", "wcag2aaa", "best-practice"],
@@ -131,6 +174,7 @@ function checkHeadingStructure(document: Document, url: string): AccessibilityRe
         message: `Heading level skipped from h${previousLevel} to h${level}`,
         help: "Heading levels should only increase by one",
         element: heading.outerHTML,
+        elementPath: generateElementPath(heading),
         impact: "moderate",
         severity: "moderate",
         tags: ["best-practice"],
@@ -149,6 +193,7 @@ function checkHeadingStructure(document: Document, url: string): AccessibilityRe
       message: "Document does not have a main heading (h1)",
       help: "Pages should contain a main heading to describe their content",
       element: "<body>...</body>",
+      elementPath: "body",
       impact: "moderate",
       severity: "moderate",
       tags: ["best-practice"],
@@ -182,6 +227,7 @@ function checkFormLabels(document: Document, url: string): AccessibilityResult[]
           message: "Form control does not have a label",
           help: "Form controls must have associated labels",
           element: control.outerHTML,
+          elementPath: generateElementPath(control),
           impact: "critical",
           severity: "critical",
           tags: ["wcag2a", "wcag2aa", "wcag2aaa", "section508"],
@@ -212,6 +258,7 @@ function checkLinkText(document: Document, url: string): AccessibilityResult[] {
         message: "Link has no text",
         help: "Links must have discernible text",
         element: link.outerHTML,
+        elementPath: generateElementPath(link),
         impact: "serious",
         severity: "serious",
         tags: ["wcag2a", "wcag2aa", "wcag2aaa", "section508"],
@@ -227,6 +274,7 @@ function checkLinkText(document: Document, url: string): AccessibilityResult[] {
         message: "Link has generic text",
         help: "Link text should be descriptive",
         element: link.outerHTML,
+        elementPath: generateElementPath(link),
         impact: "moderate",
         severity: "moderate",
         tags: ["best-practice"],
@@ -258,6 +306,7 @@ function checkColorContrast(document: Document, url: string): AccessibilityResul
         message: "Potential color contrast issue with inline styles",
         help: "Text elements must have sufficient color contrast",
         element: element.outerHTML,
+        elementPath: generateElementPath(element),
         impact: "moderate",
         severity: "moderate",
         tags: ["wcag2aa", "wcag2aaa"],
@@ -356,6 +405,7 @@ function checkARIAAttributes(document: Document, url: string): AccessibilityResu
         message: `Invalid ARIA role: ${role}`,
         help: "ARIA roles must be valid",
         element: element.outerHTML,
+        elementPath: generateElementPath(element),
         impact: "moderate",
         severity: "moderate",
         tags: ["wcag2aa", "wcag2aaa"],
@@ -382,6 +432,7 @@ function checkTextSpacing(document: Document, url: string): AccessibilityResult[
         message: "Restrictive line height may cause readability issues",
         help: "Text spacing should be adjustable without loss of content",
         element: element.outerHTML,
+        elementPath: generateElementPath(element),
         impact: "moderate",
         severity: "moderate",
         tags: ["wcag2aaa"],
@@ -412,6 +463,7 @@ function checkKeyboardAccessibility(document: Document, url: string): Accessibil
         message: "Element has click handler but may not be keyboard accessible",
         help: "Interactive elements must be accessible via keyboard",
         element: element.outerHTML,
+        elementPath: generateElementPath(element),
         impact: "critical",
         severity: "critical",
         tags: ["section508", "wcag2a", "wcag2aa", "wcag2aaa"],
@@ -433,6 +485,7 @@ function checkKeyboardAccessibility(document: Document, url: string): Accessibil
         message: `Element has positive tabindex (${tabIndex}) which disrupts natural tab order`,
         help: "Avoid using positive tabindex values",
         element: element.outerHTML,
+        elementPath: generateElementPath(element),
         impact: "moderate",
         severity: "moderate",
         tags: ["best-practice", "section508"],
@@ -456,6 +509,7 @@ function checkBasicHtmlIssues(document: Document, url: string): AccessibilityRes
       message: "Missing DOCTYPE declaration",
       help: "Include a proper DOCTYPE declaration for better accessibility",
       element: "<html>...</html>",
+      elementPath: "html",
       impact: "minor",
       severity: "minor",
       tags: ["best-practice"],
@@ -472,6 +526,7 @@ function checkBasicHtmlIssues(document: Document, url: string): AccessibilityRes
       message: "Missing language attribute on HTML element",
       help: "Specify the document language using the lang attribute",
       element: html.outerHTML.substring(0, 100) + "...",
+      elementPath: "html",
       impact: "serious",
       severity: "serious",
       tags: ["wcag2a", "wcag2aa", "wcag2aaa"],
@@ -487,6 +542,7 @@ function checkBasicHtmlIssues(document: Document, url: string): AccessibilityRes
       message: "Missing document title",
       help: "Provide a descriptive title for the document",
       element: "<head>...</head>",
+      elementPath: "head",
       impact: "serious",
       severity: "serious",
       tags: ["wcag2a", "wcag2aa", "wcag2aaa"],
@@ -495,26 +551,32 @@ function checkBasicHtmlIssues(document: Document, url: string): AccessibilityRes
   }
 
   // Check for duplicate IDs
-  const idMap = new Map<string, number>()
+  const idMap = new Map<string, Element[]>()
   const elementsWithId = document.querySelectorAll("[id]")
 
   elementsWithId.forEach((element) => {
     const id = element.getAttribute("id") || ""
-    idMap.set(id, (idMap.get(id) || 0) + 1)
+    if (!idMap.has(id)) {
+      idMap.set(id, [])
+    }
+    idMap.get(id)!.push(element)
   })
 
-  idMap.forEach((count, id) => {
-    if (count > 1) {
-      issues.push({
-        id: `duplicate-id-${id}`,
-        url,
-        message: `Duplicate ID: "${id}" appears ${count} times`,
-        help: "IDs must be unique within the document",
-        element: `<... id="${id}">...</...>`,
-        impact: "serious",
-        severity: "serious",
-        tags: ["wcag2a", "wcag2aa", "wcag2aaa"],
-        createdAt: new Date().toISOString(),
+  idMap.forEach((elements, id) => {
+    if (elements.length > 1) {
+      elements.forEach((element, index) => {
+        issues.push({
+          id: `duplicate-id-${id}-${index}`,
+          url,
+          message: `Duplicate ID: "${id}" appears ${elements.length} times`,
+          help: "IDs must be unique within the document",
+          element: element.outerHTML,
+          elementPath: generateElementPath(element),
+          impact: "serious",
+          severity: "serious",
+          tags: ["wcag2a", "wcag2aa", "wcag2aaa"],
+          createdAt: new Date().toISOString(),
+        })
       })
     }
   })
