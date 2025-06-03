@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import type { ComplianceOptions } from "@/lib/types"
 
 export function UrlForm() {
@@ -24,6 +25,8 @@ export function UrlForm() {
     experimental: false,
   })
   const [hydrated, setHydrated] = useState(false);
+  const [sitemapUrl, setSitemapUrl] = useState("");
+  const [isFetchingSitemap, setIsFetchingSitemap] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -99,6 +102,67 @@ export function UrlForm() {
     }))
   }
 
+  // Sitemap fetch handler
+  const fetchSitemapUrls = async () => {
+    if (!sitemapUrl) {
+      toast({
+        title: "Error",
+        description: "Please enter a sitemap URL",
+        variant: "destructive",
+      })
+      return
+    }
+
+    let url = sitemapUrl.trim();
+    if (!url.startsWith("http://") && !url.startsWith("https://")) {
+      url = `https://${url}`;
+    }
+
+    // Check if the URL ends with sitemap.xml, if not append it
+    if (!url.includes("sitemap.xml")) {
+      if (url.endsWith("/")) {
+        url += "sitemap.xml";
+      } else {
+        url += "/sitemap.xml";
+      }
+    }
+
+    setIsFetchingSitemap(true);
+    try {
+      // Fetch the sitemap using a server action or API endpoint
+      const response = await fetch(`/api/sitemap?url=${encodeURIComponent(url)}`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch sitemap: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.urls && data.urls.length > 0) {
+        // Add the URLs to our textarea, preserving any existing URLs
+        const newUrls = [...new Set([...urls.split("\n").filter(u => u.trim() !== ""), ...data.urls])];
+        setUrls(newUrls.join("\n"));
+        
+        toast({
+          title: "Sitemap Processed",
+          description: `Added ${data.urls.length} unique URLs from the sitemap.`,
+        });
+      } else {
+        toast({
+          title: "No URLs Found",
+          description: "The sitemap did not contain any valid URLs.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to process sitemap.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsFetchingSitemap(false);
+    }
+  };
 
   useEffect(() => {
     setHydrated(true)
@@ -107,6 +171,9 @@ export function UrlForm() {
   if(!hydrated) {
     return null
   }
+  
+  // Check if there are any URLs added already
+  const hasUrls = urls.trim().length > 0;
   
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
@@ -124,74 +191,111 @@ export function UrlForm() {
         />
       </div>
 
-      <div className="space-y-4">
-        <div>
-          <Label htmlFor="wcag-level" className="text-sm font-medium">
-            WCAG Compliance Level
-          </Label>
-          <Select value={wcagLevel} onValueChange={setWcagLevel}>
-            <SelectTrigger id="wcag-level" className="w-full mt-1">
-              <SelectValue placeholder="Select WCAG level" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="a">WCAG 2.1 A</SelectItem>
-              <SelectItem value="aa">WCAG 2.1 AA (Recommended)</SelectItem>
-              <SelectItem value="aaa">WCAG 2.1 AAA</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <Card>
-          <CardContent className="pt-6">
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Additional Compliance Checks</Label>
-              <div className="grid gap-3 pt-2">
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="section508"
-                    checked={complianceOptions.section508}
-                    onCheckedChange={() => handleCheckboxChange("section508")}
-                  />
-                  <Label htmlFor="section508" className="text-sm font-normal">
-                    Section 508
-                  </Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="bestPractices"
-                    checked={complianceOptions.bestPractices}
-                    onCheckedChange={() => handleCheckboxChange("bestPractices")}
-                  />
-                  <Label htmlFor="bestPractices" className="text-sm font-normal">
-                    Best Practices
-                  </Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="experimental"
-                    checked={complianceOptions.experimental}
-                    onCheckedChange={() => handleCheckboxChange("experimental")}
-                  />
-                  <Label htmlFor="experimental" className="text-sm font-normal">
-                    Experimental Rules
-                  </Label>
-                </div>
-              </div>
+      {/* Sitemap Scanner */}
+      <Card>
+        <CardContent className="pt-6">
+          <div className="space-y-4">
+            <Label className="text-sm font-medium">Scan from Sitemap</Label>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Input
+                placeholder="Enter sitemap URL (e.g., example.com/sitemap.xml)"
+                value={sitemapUrl}
+                onChange={(e) => setSitemapUrl(e.target.value)}
+                className="flex-1"
+              />
+              <Button 
+                type="button" 
+                variant="secondary" 
+                onClick={fetchSitemapUrls}
+                disabled={isFetchingSitemap}
+              >
+                {isFetchingSitemap ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Fetching...
+                  </>
+                ) : (
+                  "Import from Sitemap"
+                )}
+              </Button>
             </div>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </CardContent>
+      </Card>
 
-      <Button type="submit" disabled={isSubmitting} className="w-full">
-        {isSubmitting ? (
-          <>
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            Analyzing...
-          </>
-        ) : (
-          "Run Accessibility Scan"
-        )}
-      </Button>
+      {/* Only show the compliance options if URLs have been added */}
+      {hasUrls && (
+        <>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="wcag-level" className="text-sm font-medium">
+                WCAG Compliance Level
+              </Label>
+              <Select value={wcagLevel} onValueChange={setWcagLevel}>
+                <SelectTrigger id="wcag-level" className="w-full mt-1">
+                  <SelectValue placeholder="Select WCAG level" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="a">WCAG 2.1 A</SelectItem>
+                  <SelectItem value="aa">WCAG 2.1 AA (Recommended)</SelectItem>
+                  <SelectItem value="aaa">WCAG 2.1 AAA</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Card>
+              <CardContent className="pt-6">
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">Additional Compliance Checks</Label>
+                  <div className="grid gap-3 pt-2">
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id="section508"
+                        checked={complianceOptions.section508}
+                        onCheckedChange={() => handleCheckboxChange("section508")}
+                      />
+                      <Label htmlFor="section508" className="text-sm font-normal">
+                        Section 508
+                      </Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id="bestPractices"
+                        checked={complianceOptions.bestPractices}
+                        onCheckedChange={() => handleCheckboxChange("bestPractices")}
+                      />
+                      <Label htmlFor="bestPractices" className="text-sm font-normal">
+                        Best Practices
+                      </Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id="experimental"
+                        checked={complianceOptions.experimental}
+                        onCheckedChange={() => handleCheckboxChange("experimental")}
+                      />
+                      <Label htmlFor="experimental" className="text-sm font-normal">
+                        Experimental Rules
+                      </Label>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Button type="submit" disabled={isSubmitting} className="w-full">
+            {isSubmitting ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Analyzing...
+              </>
+            ) : (
+              "Run Accessibility Scan"
+            )}
+          </Button>
+        </>
+      )}
     </form>
   )
 }

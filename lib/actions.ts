@@ -195,8 +195,22 @@ export async function getAccessibilityResults(params: ResultsQueryParams) {
   }
 }
 
-export async function exportToExcel() {
+export async function exportToExcel(params?: {
+  search?: string;
+  sortBy?: string;
+  severityFilters?: string[];
+  complianceFilters?: string[];
+  exportAll?: boolean;
+}) {
   try {
+    console.log('Export params:', params);
+    console.log('Original scan results count:', scanResults.length);
+    
+    // Check if we have any scan results
+    if (scanResults.length === 0) {
+      throw new Error('No accessibility scan results available. Please scan some URLs first.');
+    }
+    
     // Create a new Excel workbook
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'Accessibility Checker';
@@ -215,8 +229,21 @@ export async function exportToExcel() {
       { header: 'Total Issues', key: 'total', width: 15 },
     ];
     
+    // Filter the scan results if necessary
+    let filteredScanResults = [...scanResults];
+    
+    // Apply URL/element search filter
+    if (params?.search) {
+      const searchLower = params.search.toLowerCase();
+      filteredScanResults = filteredScanResults.filter(result => 
+        result.url.toLowerCase().includes(searchLower)
+      );
+    }
+    
+    console.log('Filtered scan results count:', filteredScanResults.length);
+    
     // Add summary data
-    scanResults.forEach(result => {
+    filteredScanResults.forEach(result => {
       summarySheet.addRow({
         url: result.url,
         critical: result.summary.critical,
@@ -254,12 +281,72 @@ export async function exportToExcel() {
       { header: 'Created At', key: 'createdAt', width: 20 },
     ];
     
-    // Add all results
-    const allResults: AccessibilityResult[] = [];
-    scanResults.forEach(scan => {
-      allResults.push(...scan.results);
+    // Get all results and apply filters
+    let allResults: AccessibilityResult[] = [];
+    
+    filteredScanResults.forEach(scan => {
+      // Get results from this scan
+      let scanResults = [...scan.results];
+      console.log(`Scan URL: ${scan.url}, Results count before filtering: ${scanResults.length}`);
+      
+      // Apply severity filters
+      if (params?.severityFilters && params.severityFilters.length > 0) {
+        scanResults = scanResults.filter(result => 
+          params.severityFilters!.includes(result.severity.toLowerCase())
+        );
+        console.log('After severity filters:', scanResults.length);
+      }
+      
+      // Apply compliance filters
+      if (params?.complianceFilters && params.complianceFilters.length > 0) {
+        scanResults = scanResults.filter(result => 
+          result.tags.some(tag => 
+            params.complianceFilters!.some(filter => tag.includes(filter))
+          )
+        );
+        console.log('After compliance filters:', scanResults.length);
+      }
+      
+      // Apply search filter to individual results
+      if (params?.search) {
+        const searchLower = params.search.toLowerCase();
+        scanResults = scanResults.filter(result => 
+          result.message.toLowerCase().includes(searchLower) ||
+          result.element.toLowerCase().includes(searchLower) ||
+          result.help.toLowerCase().includes(searchLower)
+        );
+        console.log('After search filter:', scanResults.length);
+      }
+      
+      allResults.push(...scanResults);
     });
     
+    console.log('Total results count after all filtering:', allResults.length);
+    
+    // Sort results if necessary
+    if (params?.sortBy) {
+      switch (params.sortBy) {
+        case 'severity':
+          // Define severity order: critical > serious > moderate > minor
+          const severityOrder = { critical: 4, serious: 3, moderate: 2, minor: 1 };
+          allResults.sort((a, b) => 
+            (severityOrder[b.severity.toLowerCase() as keyof typeof severityOrder] || 0) - 
+            (severityOrder[a.severity.toLowerCase() as keyof typeof severityOrder] || 0)
+          );
+          break;
+        case 'url':
+          allResults.sort((a, b) => a.url.localeCompare(b.url));
+          break;
+        case 'date':
+          allResults.sort((a, b) => {
+            if (!a.createdAt || !b.createdAt) return 0;
+            return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+          });
+          break;
+      }
+    }
+    
+    // Add all filtered results to the sheet
     allResults.forEach(result => {
       detailsSheet.addRow({
         url: result.url,
@@ -293,6 +380,7 @@ export async function exportToExcel() {
     const filename = `accessibility-report-${Date.now()}.xlsx`;
     const filePath = path.join(exportDir, filename);
     await workbook.xlsx.writeFile(filePath);
+    console.log('Excel file saved successfully at:', filePath);
     
     return { 
       success: true, 

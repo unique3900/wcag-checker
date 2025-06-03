@@ -24,7 +24,7 @@ async function ensureBrowsersInstalled() {
     console.log('Chromium not found, attempting to install browsers...')
     try {
       // Install browsers
-      await execAsync('pnpx playwright-core install chromium')
+      await execAsync('npx playwright-core install chromium')
       return true
     } catch (installError) {
       console.error('Failed to install browsers:', installError)
@@ -226,12 +226,16 @@ function processAxeResults(results: any, url: string): AccessibilityResult[] {
           severity = "moderate"
       }
 
+      // Extract element path from axe target
+      const elementPath = node.target && node.target.length > 0 ? node.target[0] : null
+
       return {
         id: `${violation.id}-${index}`,
         url,
         message: violation.description,
         help: violation.help,
         element: node.html,
+        elementPath: elementPath,
         impact: violation.impact,
         severity,
         tags: violation.tags,
@@ -270,6 +274,47 @@ function getAxeTags(complianceOptions: ComplianceOptions): string[] {
   return tags
 }
 
+// Enhanced helper function to generate CSS selector paths
+function generateElementPath(element: Element): string {
+  const path: string[] = []
+  let current: Element | null = element
+
+  while (current && current.nodeType === Node.ELEMENT_NODE) {
+    let selector = current.tagName.toLowerCase()
+
+    // Add ID if present (most specific)
+    if (current.id) {
+      selector += `#${current.id}`
+      path.unshift(selector)
+      break // ID is unique, we can stop here
+    }
+
+    // Add classes if present
+    if (current.className && typeof current.className === 'string') {
+      const classes = current.className.split(/\s+/).filter(cls => cls.length > 0)
+      if (classes.length > 0) {
+        selector += '.' + classes.join('.')
+      }
+    }
+
+    // Add nth-child if there are siblings with the same tag
+    if (current.parentElement) {
+      const siblings = Array.from(current.parentElement.children).filter(
+        sibling => sibling.tagName === current!.tagName
+      )
+      if (siblings.length > 1) {
+        const index = siblings.indexOf(current) + 1
+        selector += `:nth-child(${index})`
+      }
+    }
+
+    path.unshift(selector)
+    current = current.parentElement
+  }
+
+  return path.join(' > ')
+}
+
 /**
  * Performs DOM-based analysis to find accessibility issues
  */
@@ -284,30 +329,48 @@ async function performDOMAnalysis(page: Page, url: string): Promise<Accessibilit
     images.forEach((img, index) => {
       issues.push({
         element: img.outerHTML,
-        path: getElementPath(img),
+        path: generateElementPath(img),
       })
     })
     
-    function getElementPath(element: Element): string {
-      if (!element || !element.parentElement) return ''
-      
-      let path = ''
-      let current = element
-      
-      while (current && current.parentElement) {
-        let tag = current.tagName.toLowerCase()
-        let siblings = Array.from(current.parentElement.children).filter(c => c.tagName === current.tagName)
-        
-        if (siblings.length > 1) {
-          let index = siblings.indexOf(current) + 1
-          tag += `:nth-of-type(${index})`
+    function generateElementPath(element: Element): string {
+      const path: string[] = []
+      let current: Element | null = element
+
+      while (current && current.nodeType === Node.ELEMENT_NODE) {
+        let selector = current.tagName.toLowerCase()
+
+        // Add ID if present (most specific)
+        if (current.id) {
+          selector += `#${current.id}`
+          path.unshift(selector)
+          break // ID is unique, we can stop here
         }
-        
-        path = tag + (path ? ' > ' + path : '')
+
+        // Add classes if present
+        if (current.className && typeof current.className === 'string') {
+          const classes = current.className.split(/\s+/).filter(cls => cls.length > 0)
+          if (classes.length > 0) {
+            selector += '.' + classes.join('.')
+          }
+        }
+
+        // Add nth-child if there are siblings with the same tag
+        if (current.parentElement) {
+          const siblings = Array.from(current.parentElement.children).filter(
+            sibling => sibling.tagName === current!.tagName
+          )
+          if (siblings.length > 1) {
+            const index = siblings.indexOf(current) + 1
+            selector += `:nth-child(${index})`
+          }
+        }
+
+        path.unshift(selector)
         current = current.parentElement
       }
-      
-      return path
+
+      return path.join(' > ')
     }
     
     return issues
@@ -337,7 +400,7 @@ async function performDOMAnalysis(page: Page, url: string): Promise<Accessibilit
       if (!link.textContent?.trim() && !link.querySelector('img[alt]') && !link.getAttribute('aria-label')) {
         issues.push({
           element: link.outerHTML,
-          path: getElementPath(link),
+          path: generateElementPath(link),
           type: 'link'
         })
       }
@@ -348,32 +411,50 @@ async function performDOMAnalysis(page: Page, url: string): Promise<Accessibilit
       if (!button.textContent?.trim() && !button.querySelector('img[alt]') && !button.getAttribute('aria-label')) {
         issues.push({
           element: button.outerHTML,
-          path: getElementPath(button),
+          path: generateElementPath(button),
           type: 'button'
         })
       }
     })
     
-    function getElementPath(element: Element): string {
-      if (!element || !element.parentElement) return ''
-      
-      let path = ''
-      let current = element
-      
-      while (current && current.parentElement) {
-        let tag = current.tagName.toLowerCase()
-        let siblings = Array.from(current.parentElement.children).filter(c => c.tagName === current.tagName)
-        
-        if (siblings.length > 1) {
-          let index = siblings.indexOf(current) + 1
-          tag += `:nth-of-type(${index})`
+    function generateElementPath(element: Element): string {
+      const path: string[] = []
+      let current: Element | null = element
+
+      while (current && current.nodeType === Node.ELEMENT_NODE) {
+        let selector = current.tagName.toLowerCase()
+
+        // Add ID if present (most specific)
+        if (current.id) {
+          selector += `#${current.id}`
+          path.unshift(selector)
+          break // ID is unique, we can stop here
         }
-        
-        path = tag + (path ? ' > ' + path : '')
+
+        // Add classes if present
+        if (current.className && typeof current.className === 'string') {
+          const classes = current.className.split(/\s+/).filter(cls => cls.length > 0)
+          if (classes.length > 0) {
+            selector += '.' + classes.join('.')
+          }
+        }
+
+        // Add nth-child if there are siblings with the same tag
+        if (current.parentElement) {
+          const siblings = Array.from(current.parentElement.children).filter(
+            sibling => sibling.tagName === current!.tagName
+          )
+          if (siblings.length > 1) {
+            const index = siblings.indexOf(current) + 1
+            selector += `:nth-child(${index})`
+          }
+        }
+
+        path.unshift(selector)
         current = current.parentElement
       }
-      
-      return path
+
+      return path.join(' > ')
     }
     
     return issues
@@ -409,7 +490,7 @@ async function performDOMAnalysis(page: Page, url: string): Promise<Accessibilit
       if (index === 0 && level !== 1) {
         issues.push({
           element: heading.outerHTML,
-          path: getElementPath(heading),
+          path: generateElementPath(heading),
           message: 'First heading is not an h1'
         })
       }
@@ -418,7 +499,7 @@ async function performDOMAnalysis(page: Page, url: string): Promise<Accessibilit
       if (level > previousLevel + 1) {
         issues.push({
           element: heading.outerHTML,
-          path: getElementPath(heading),
+          path: generateElementPath(heading),
           message: `Skipped heading level: h${previousLevel} to h${level}`
         })
       }
@@ -426,26 +507,44 @@ async function performDOMAnalysis(page: Page, url: string): Promise<Accessibilit
       previousLevel = level
     })
     
-    function getElementPath(element: Element): string {
-      if (!element || !element.parentElement) return ''
-      
-      let path = ''
-      let current = element
-      
-      while (current && current.parentElement) {
-        let tag = current.tagName.toLowerCase()
-        let siblings = Array.from(current.parentElement.children).filter(c => c.tagName === current.tagName)
-        
-        if (siblings.length > 1) {
-          let index = siblings.indexOf(current) + 1
-          tag += `:nth-of-type(${index})`
+    function generateElementPath(element: Element): string {
+      const path: string[] = []
+      let current: Element | null = element
+
+      while (current && current.nodeType === Node.ELEMENT_NODE) {
+        let selector = current.tagName.toLowerCase()
+
+        // Add ID if present (most specific)
+        if (current.id) {
+          selector += `#${current.id}`
+          path.unshift(selector)
+          break // ID is unique, we can stop here
         }
-        
-        path = tag + (path ? ' > ' + path : '')
+
+        // Add classes if present
+        if (current.className && typeof current.className === 'string') {
+          const classes = current.className.split(/\s+/).filter(cls => cls.length > 0)
+          if (classes.length > 0) {
+            selector += '.' + classes.join('.')
+          }
+        }
+
+        // Add nth-child if there are siblings with the same tag
+        if (current.parentElement) {
+          const siblings = Array.from(current.parentElement.children).filter(
+            sibling => sibling.tagName === current!.tagName
+          )
+          if (siblings.length > 1) {
+            const index = siblings.indexOf(current) + 1
+            selector += `:nth-child(${index})`
+          }
+        }
+
+        path.unshift(selector)
         current = current.parentElement
       }
-      
-      return path
+
+      return path.join(' > ')
     }
     
     return issues
@@ -497,7 +596,7 @@ async function performContrastAnalysis(page: Page, url: string): Promise<Accessi
         if (contrast < minContrast) {
           issues.push({
             element: element.outerHTML,
-            path: getElementPath(element),
+            path: generateElementPath(element),
             textColor,
             backgroundColor,
             contrast,
@@ -576,26 +675,44 @@ async function performContrastAnalysis(page: Page, url: string): Promise<Accessi
       return 0.2126 * sRGB[0] + 0.7152 * sRGB[1] + 0.0722 * sRGB[2]
     }
     
-    function getElementPath(element: Element): string {
-      if (!element || !element.parentElement) return ''
-      
-      let path = ''
-      let current = element
-      
-      while (current && current.parentElement) {
-        let tag = current.tagName.toLowerCase()
-        let siblings = Array.from(current.parentElement.children).filter(c => c.tagName === current.tagName)
-        
-        if (siblings.length > 1) {
-          let index = siblings.indexOf(current) + 1
-          tag += `:nth-of-type(${index})`
+    function generateElementPath(element: Element): string {
+      const path: string[] = []
+      let current: Element | null = element
+
+      while (current && current.nodeType === Node.ELEMENT_NODE) {
+        let selector = current.tagName.toLowerCase()
+
+        // Add ID if present (most specific)
+        if (current.id) {
+          selector += `#${current.id}`
+          path.unshift(selector)
+          break // ID is unique, we can stop here
         }
-        
-        path = tag + (path ? ' > ' + path : '')
+
+        // Add classes if present
+        if (current.className && typeof current.className === 'string') {
+          const classes = current.className.split(/\s+/).filter(cls => cls.length > 0)
+          if (classes.length > 0) {
+            selector += '.' + classes.join('.')
+          }
+        }
+
+        // Add nth-child if there are siblings with the same tag
+        if (current.parentElement) {
+          const siblings = Array.from(current.parentElement.children).filter(
+            sibling => sibling.tagName === current!.tagName
+          )
+          if (siblings.length > 1) {
+            const index = siblings.indexOf(current) + 1
+            selector += `:nth-child(${index})`
+          }
+        }
+
+        path.unshift(selector)
         current = current.parentElement
       }
-      
-      return path
+
+      return path.join(' > ')
     }
     
     return issues
@@ -662,7 +779,7 @@ async function performSensoryAnalysis(page: Page, url: string): Promise<Accessib
         if (text.includes(phrase)) {
           issues.push({
             element: element.outerHTML,
-            path: getElementPath(element),
+            path: generateElementPath(element),
             text: element.textContent,
             phrase
           })
@@ -671,26 +788,44 @@ async function performSensoryAnalysis(page: Page, url: string): Promise<Accessib
       }
     })
     
-    function getElementPath(element: Element): string {
-      if (!element || !element.parentElement) return ''
-      
-      let path = ''
-      let current = element
-      
-      while (current && current.parentElement) {
-        let tag = current.tagName.toLowerCase()
-        let siblings = Array.from(current.parentElement.children).filter(c => c.tagName === current.tagName)
-        
-        if (siblings.length > 1) {
-          let index = siblings.indexOf(current) + 1
-          tag += `:nth-of-type(${index})`
+    function generateElementPath(element: Element): string {
+      const path: string[] = []
+      let current: Element | null = element
+
+      while (current && current.nodeType === Node.ELEMENT_NODE) {
+        let selector = current.tagName.toLowerCase()
+
+        // Add ID if present (most specific)
+        if (current.id) {
+          selector += `#${current.id}`
+          path.unshift(selector)
+          break // ID is unique, we can stop here
         }
-        
-        path = tag + (path ? ' > ' + path : '')
+
+        // Add classes if present
+        if (current.className && typeof current.className === 'string') {
+          const classes = current.className.split(/\s+/).filter(cls => cls.length > 0)
+          if (classes.length > 0) {
+            selector += '.' + classes.join('.')
+          }
+        }
+
+        // Add nth-child if there are siblings with the same tag
+        if (current.parentElement) {
+          const siblings = Array.from(current.parentElement.children).filter(
+            sibling => sibling.tagName === current!.tagName
+          )
+          if (siblings.length > 1) {
+            const index = siblings.indexOf(current) + 1
+            selector += `:nth-child(${index})`
+          }
+        }
+
+        path.unshift(selector)
         current = current.parentElement
       }
-      
-      return path
+
+      return path.join(' > ')
     }
     
     return issues
@@ -734,7 +869,7 @@ async function performSensoryAnalysis(page: Page, url: string): Promise<Accessib
         if (element.textContent.trim().length > 20) {
           issues.push({
             element: element.outerHTML,
-            path: getElementPath(element),
+            path: generateElementPath(element),
             position: style.position,
             zIndex: style.zIndex
           })
@@ -742,26 +877,44 @@ async function performSensoryAnalysis(page: Page, url: string): Promise<Accessib
       }
     })
     
-    function getElementPath(element: Element): string {
-      if (!element || !element.parentElement) return ''
-      
-      let path = ''
-      let current = element
-      
-      while (current && current.parentElement) {
-        let tag = current.tagName.toLowerCase()
-        let siblings = Array.from(current.parentElement.children).filter(c => c.tagName === current.tagName)
-        
-        if (siblings.length > 1) {
-          let index = siblings.indexOf(current) + 1
-          tag += `:nth-of-type(${index})`
+    function generateElementPath(element: Element): string {
+      const path: string[] = []
+      let current: Element | null = element
+
+      while (current && current.nodeType === Node.ELEMENT_NODE) {
+        let selector = current.tagName.toLowerCase()
+
+        // Add ID if present (most specific)
+        if (current.id) {
+          selector += `#${current.id}`
+          path.unshift(selector)
+          break // ID is unique, we can stop here
         }
-        
-        path = tag + (path ? ' > ' + path : '')
+
+        // Add classes if present
+        if (current.className && typeof current.className === 'string') {
+          const classes = current.className.split(/\s+/).filter(cls => cls.length > 0)
+          if (classes.length > 0) {
+            selector += '.' + classes.join('.')
+          }
+        }
+
+        // Add nth-child if there are siblings with the same tag
+        if (current.parentElement) {
+          const siblings = Array.from(current.parentElement.children).filter(
+            sibling => sibling.tagName === current!.tagName
+          )
+          if (siblings.length > 1) {
+            const index = siblings.indexOf(current) + 1
+            selector += `:nth-child(${index})`
+          }
+        }
+
+        path.unshift(selector)
         current = current.parentElement
       }
-      
-      return path
+
+      return path.join(' > ')
     }
     
     return issues

@@ -1,0 +1,185 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [master]
+
+env:
+  DEPLOY_PATH: 'C:\inetpub\wwwroot\wcagchecker'
+  APP_POOL_NAME: 'wcagchecker.websearchpro.net'
+  STATIC_FILES: 'server.js,web.config'
+
+jobs:
+  setup-build:
+    name: Install & Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm v8
+        uses: pnpm/action-setup@v2
+        with:
+          version: '8'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies (all)
+        run: pnpm install
+
+      - name: Build project
+        run: pnpm build
+
+      - name: Archive production files
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-build
+          path: |
+            .next
+            app
+            components
+            exports
+            hooks
+            lib
+            public
+            styles
+            components.json
+            next.config.mjs
+            package-lock.json
+            package.json
+            pnpm-lock.yaml
+            postcss.config.mjs
+            setup-playwright.js
+            tailwind.config.ts                                    
+            tsconfig.json
+          retention-days: 1
+
+  quality-check:
+    name: SonarQube Analysis
+    needs: setup-build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pnpm v8
+        uses: pnpm/action-setup@v2
+        with:
+          version: '8'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Run SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.projectKey=WCAG_CHECKER
+            -Dsonar.projectName="WCAG Checker"
+            -Dsonar.sources=.
+            -Dsonar.exclusions=node_modules/**,**/*.test.js,**/*.spec.js,coverage/**,.next/**
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+  deploy:
+    name: Deploy to Windows IIS Server
+    needs: [setup-build, quality-check]
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Download production build
+        uses: actions/download-artifact@v4
+        with:
+          name: production-build
+          path: ./deploy-files
+
+      - name: Configure WinRM
+        shell: pwsh
+        run: |
+          Set-Item WSMan:\localhost\Client\TrustedHosts -Value $env:WIN_HOST -Force
+      - name: Preserve static files
+        shell: pwsh
+        run: |
+          $securePass = ConvertTo-SecureString $env:WIN_PASS -AsPlainText -Force
+          $credential = New-Object PSCredential ($env:WIN_USER, $securePass)
+          $filesToPreserve = $env:STATIC_FILES -split ','
+          Invoke-Command -ComputerName $env:WIN_HOST -Credential $credential -ScriptBlock {
+            param($path, $files)
+            foreach ($file in $files) {
+              $src = Join-Path $path $file.Trim()
+              $dst = Join-Path $path ("_preserved_" + $file.Trim())
+              if (Test-Path $src) { Copy-Item $src $dst -Force }
+            }
+          } -ArgumentList $env:DEPLOY_PATH, $filesToPreserve
+      - name: Deploy files
+        shell: pwsh
+        run: |
+          $securePass = ConvertTo-SecureString $env:WIN_PASS -AsPlainText -Force
+          $credential = New-Object PSCredential ($env:WIN_USER, $securePass)
+          $session = New-PSSession -ComputerName $env:WIN_HOST -Credential $credential
+          Copy-Item -Path ".\deploy-files\*" -Destination $env:DEPLOY_PATH -ToSession $session -Recurse -Force
+          Remove-PSSession $session
+      - name: Install production dependencies on IIS server (pnpm v8)
+        shell: pwsh
+        run: |
+          $securePass = ConvertTo-SecureString $env:WIN_PASS -AsPlainText -Force
+          $credential = New-Object PSCredential ($env:WIN_USER, $securePass)
+          Invoke-Command -ComputerName $env:WIN_HOST -Credential $credential -ScriptBlock {
+            param($path)
+            Set-Location $path
+            npm install -g pnpm@8
+            Write-Host "Installing production dependencies..."
+            pnpm install
+            Write-Host "Verifying pnpm version..."
+            pnpm --version
+            Write-Host "Checking for 'next' module presence..."
+            if (Test-Path (Join-Path $path 'node_modules\next')) {
+              Write-Host "'next' module found."
+            } else {
+              Write-Error "'next' module NOT found! Deployment may fail."
+              exit 1
+            }
+          } -ArgumentList $env:DEPLOY_PATH
+      - name: Restore static files
+        shell: pwsh
+        run: |
+          $securePass = ConvertTo-SecureString $env:WIN_PASS -AsPlainText -Force
+          $credential = New-Object PSCredential ($env:WIN_USER, $securePass)
+          $filesToPreserve = $env:STATIC_FILES -split ','
+          Invoke-Command -ComputerName $env:WIN_HOST -Credential $credential -ScriptBlock {
+            param($path, $files)
+            foreach ($file in $files) {
+              $preserved = Join-Path $path ("_preserved_" + $file.Trim())
+              $original = Join-Path $path $file.Trim()
+              if (Test-Path $preserved) {
+                Move-Item $preserved $original -Force
+              }
+            }
+          } -ArgumentList $env:DEPLOY_PATH, $filesToPreserve
+      - name: Restart Application Pool
+        shell: pwsh
+        run: |
+          $securePass = ConvertTo-SecureString $env:WIN_PASS -AsPlainText -Force
+          $credential = New-Object PSCredential ($env:WIN_USER, $securePass)
+          Invoke-Command -ComputerName $env:WIN_HOST -Credential $credential -ScriptBlock {
+            param($appPoolName)
+            Import-Module WebAdministration
+            Restart-WebAppPool -Name $appPoolName
+          } -ArgumentList $env:APP_POOL_NAME
+    env:
+      WIN_HOST: ${{ secrets.WINDOWS_HOST }}
+      WIN_USER: ${{ secrets.WINDOWS_USERNAME }}
+      WIN_PASS: ${{ secrets.WINDOWS_PASSWORD }}
