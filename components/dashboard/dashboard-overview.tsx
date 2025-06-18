@@ -71,16 +71,30 @@ export function DashboardOverview() {
   const fetchDashboardStats = async () => {
     setLoading(true)
     setError(null)
-    
     try {
       const response = await fetch('/api/dashboard/stats')
       if (!response.ok) {
         throw new Error('Failed to fetch dashboard stats')
       }
-      
       const data = await response.json()
-      setStats(data.overview)
-      setProjectStats(data.projects)
+      if (data.overview) {
+        setStats(data.overview)
+        setProjectStats(Array.isArray(data.projects) ? data.projects : [])
+      } else {
+        setStats({
+          totalProjects: data.totalProjects ?? 0,
+          totalScans: data.totalScans ?? 0,
+          totalIssues: data.totalIssues ?? 0,
+          criticalIssues: data.criticalIssues ?? 0,
+          seriousIssues: data.seriousIssues ?? 0,
+          moderateIssues: data.moderateIssues ?? 0,
+          minorIssues: data.minorIssues ?? 0,
+          totalEstimatedTime: data.totalEstimatedTime ?? '0m',
+          averageIssuesPerProject: data.averageIssuesPerProject ?? 0,
+          lastScanDate: data.lastScanDate ?? null
+        })
+        setProjectStats(Array.isArray(data.projects) ? data.projects : [])
+      }
     } catch (err) {
       console.error('Error fetching dashboard stats:', err)
       setError(err instanceof Error ? err.message : 'Failed to load dashboard data')
@@ -235,7 +249,7 @@ export function DashboardOverview() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {projectStats.map((project) => (
+            {(projectStats ?? []).map((project) => (
               <div key={project.id} className="flex items-center justify-between p-4 border rounded-lg">
                 <div className="flex-1">
                   <h4 className="font-medium">{project.name}</h4>
@@ -276,7 +290,7 @@ export function DashboardOverview() {
                 </div>
               </div>
             ))}
-            {projectStats.length === 0 && (
+            {(projectStats ?? []).length === 0 && (
               <div className="text-center py-8 text-gray-500">
                 No projects found. Create a project to get started.
               </div>

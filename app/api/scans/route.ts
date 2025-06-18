@@ -16,119 +16,112 @@ export async function POST(request: Request) {
       )
     }
 
-    let scan
-    
-    if (scanId) {
-      // This is a rescan - we'll implement proper diff logic
-      console.log(`Rescan requested for scan ${scanId}`)
+    // Start a transaction to ensure atomicity
+    const scan = await prisma.$transaction(async (tx) => {
+      let scan
       
-      // Update the existing scan
-      scan = await prisma.scan.update({
-        where: { id: scanId },
-        data: {
-          status: "in_progress",
-          url,
-          startedAt: new Date(),
-          completedAt: null,
-          error: null,
-          totalIssues: null,
-          criticalIssues: null,
-          seriousIssues: null,
-          moderateIssues: null,
-          minorIssues: null,
-          analysisMethod: null
-        }
-      })
-    } else {
-      // Create new scan record
-      scan = await prisma.scan.create({
-        data: {
-          projectId,
-          url,
-          status: "in_progress",
-          startedAt: new Date()
-        }
-      })
-    }
+      if (scanId) {
+        // This is a rescan - update existing scan
+        scan = await tx.scan.update({
+          where: { id: scanId },
+          data: {
+            status: "in_progress",
+            url,
+            startedAt: new Date(),
+            completedAt: null,
+            error: null,
+            totalIssues: null,
+            criticalIssues: null,
+            seriousIssues: null,
+            moderateIssues: null,
+            minorIssues: null,
+            analysisMethod: null
+          }
+        })
 
-    // Process the scan asynchronously
-    processScan(scan.id, url, complianceOptions || {
-      wcagLevel: "aa",
-      section508: false,
-      bestPractices: true,
-      experimental: false
-    }, !!scanId).catch(error => {
-      console.error(`Error processing scan ${scan.id}:`, error)
-      // Update scan status to failed
-      prisma.scan.update({
-        where: { id: scan.id },
-        data: { 
-          status: "failed",
-          completedAt: new Date(),
-          error: error instanceof Error ? error.message : "Unknown error"
-        }
-      }).catch(console.error)
+        // Delete existing results for this scan
+        await tx.result.deleteMany({
+          where: { scanId }
+        })
+      } else {
+        // Create new scan record
+        scan = await tx.scan.create({
+          data: {
+            projectId,
+            url,
+            status: "in_progress",
+            startedAt: new Date()
+          }
+        })
+      }
+
+      return scan
     })
 
-    return NextResponse.json(scan)
+    // Process the scan asynchronously
+    processScan(scan.id, url, complianceOptions, !!scanId).catch(error => {
+      console.error(`Error processing scan ${scan.id}:`, error)
+    })
+
+    return NextResponse.json({ 
+      success: true, 
+      message: "Scan started successfully",
+      scan 
+    })
   } catch (error) {
-    console.error("Error creating scan:", error)
+    console.error("Error starting scan:", error)
     return NextResponse.json(
-      { error: "Failed to create scan" },
+      { error: "Failed to start scan" },
       { status: 500 }
     )
   }
 }
 
 async function processScan(scanId: string, url: string, complianceOptions: ComplianceOptions, isRescan: boolean = false) {
-  console.log(`Starting scan processing for scanId: ${scanId}, url: ${url}, isRescan: ${isRescan}`)
-  
   try {
-    let analysisResult
-    let analysisMethod = 'unknown'
+    // Update scan status to in_progress
+    await prisma.scan.update({
+      where: { id: scanId },
+      data: { status: "in_progress" }
+    })
 
-    // Try Simple Checker first (most reliable)
+    // Validate URL exists and is accessible
     try {
-      console.log(`Attempting Simple Checker analysis for ${url}`)
-      analysisResult = await simpleAnalyze(url, complianceOptions)
-      analysisMethod = 'simple'
-      console.log(`Simple Checker succeeded for ${url}, found ${analysisResult.results.length} issues`)
-    } catch (simpleError) {
-      console.log(`Simple Checker failed for ${url}:`, simpleError)
-      
-      // Fallback to Playwright
+      const response = await fetch(url, { method: 'HEAD' })
+      if (!response.ok) {
+        throw new Error(`URL returned status ${response.status}`)
+      }
+    } catch (error) {
+      throw new Error(`Failed to access URL: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
+
+    // Determine which analysis method to use
+    let analysisResult
+    let analysisMethod = "simple"
+
+    try {
+      // Try playwright-axe first for better accuracy
+      analysisResult = await playwrightAnalyze(url, complianceOptions)
+      analysisMethod = "playwright-axe"
+    } catch (error) {
+      console.warn("Playwright analysis failed, falling back to simple checker:", error)
       try {
-        console.log(`Attempting Playwright analysis for ${url}`)
-        analysisResult = await playwrightAnalyze(url, {
-          ...complianceOptions,
-          captureScreenshots: false // Disable screenshots for faster processing
-        })
-        analysisMethod = 'playwright'
-        console.log(`Playwright succeeded for ${url}, found ${analysisResult.results.length} issues`)
-      } catch (playwrightError) {
-        console.log(`Playwright failed for ${url}:`, playwrightError)
-        
-        // Final fallback to HTML validator
-        try {
-          console.log(`Attempting HTML validator analysis for ${url}`)
-          analysisResult = await htmlAnalyze(url, complianceOptions)
-          analysisMethod = 'html-validator'
-          console.log(`HTML validator succeeded for ${url}, found ${analysisResult.results.length} issues`)
-        } catch (htmlError) {
-          console.error(`All analysis methods failed for ${url}:`, htmlError)
-          throw new Error(`All analysis methods failed: Simple: ${simpleError}, Playwright: ${playwrightError}, HTML: ${htmlError}`)
-        }
+        // Fall back to simple checker
+        analysisResult = await simpleAnalyze(url, complianceOptions)
+        analysisMethod = "simple"
+      } catch (error) {
+        console.warn("Simple analysis failed, falling back to HTML validator:", error)
+        // Last resort: HTML validator
+        analysisResult = await htmlAnalyze(url, complianceOptions)
+        analysisMethod = "html-validator"
       }
     }
 
-    if (isRescan) {
-      // Implement proper diff logic for rescans
-      await handleRescanDiff(scanId, analysisResult.results)
-    } else {
-      // Save results to database for new scans
-      console.log(`Saving ${analysisResult.results.length} results to database for scan ${scanId}`)
+    // Start a transaction to ensure atomicity of results update
+    await prisma.$transaction(async (tx) => {
+      // Save results to database
       if (analysisResult.results.length > 0) {
-        await prisma.result.createMany({
+        await tx.result.createMany({
           data: analysisResult.results.map(result => ({
             scanId,
             url: result.url,
@@ -140,31 +133,28 @@ async function processScan(scanId: string, url: string, complianceOptions: Compl
             tags: result.tags,
             elementPath: result.elementPath,
             details: result.details || {},
-            createdAt: new Date(result.createdAt)
+            createdAt: new Date()
           }))
         })
-        console.log(`Successfully saved ${analysisResult.results.length} results for scan ${scanId}`)
-      } else {
-        console.log(`No results to save for scan ${scanId}`)
       }
-    }
 
-    // Update scan status to completed with summary data
-    await prisma.scan.update({
-      where: { id: scanId },
-      data: { 
-        status: "completed",
-        completedAt: new Date(),
-        totalIssues: analysisResult.summary.total,
-        criticalIssues: analysisResult.summary.critical,
-        seriousIssues: analysisResult.summary.serious,
-        moderateIssues: analysisResult.summary.moderate,
-        minorIssues: analysisResult.summary.minor,
-        analysisMethod
-      }
+      // Update scan status to completed with summary data
+      await tx.scan.update({
+        where: { id: scanId },
+        data: { 
+          status: "completed",
+          completedAt: new Date(),
+          totalIssues: analysisResult.summary.total,
+          criticalIssues: analysisResult.summary.critical,
+          seriousIssues: analysisResult.summary.serious,
+          moderateIssues: analysisResult.summary.moderate,
+          minorIssues: analysisResult.summary.minor,
+          analysisMethod
+        }
+      })
     })
-    console.log(`Updated scan ${scanId} status to completed`)
 
+    console.log(`Scan ${scanId} completed successfully`)
   } catch (error) {
     console.error(`Error processing scan ${scanId}:`, error)
     

@@ -25,7 +25,8 @@ export default async function Home() {
     scans: project.scans.map(scan => ({
       id: scan.id,
       status: scan.status,
-      createdAt: scan.createdAt.toISOString()
+      createdAt: scan.createdAt.toISOString(),
+      updatedAt: scan.updatedAt.toISOString()
     }))
   }))
 
@@ -55,6 +56,7 @@ export default async function Home() {
                 <CardDescription>Select a project to view or manage its accessibility scans</CardDescription>
               </CardHeader>
               <CardContent>
+                {/* @ts-ignore */}
                 <ProjectList projects={projects} />
               </CardContent>
             </Card>

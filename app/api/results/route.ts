@@ -14,6 +14,7 @@ export async function GET(request: NextRequest) {
       pageSize,
       sortBy,
       search,
+      urls: [],
     })
 
     return NextResponse.json(results)

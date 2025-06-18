@@ -15,6 +15,7 @@ interface Project {
   scans: {
     id: string
     createdAt: Date
+    updatedAt: Date
     results: {
       id: string
       url: string
@@ -142,8 +143,14 @@ export function ProjectHeader({ project }: ProjectHeaderProps) {
       <div className="flex items-center gap-4">
         <div className="text-sm text-gray-500">
           {project.urls.length} URL{project.urls.length !== 1 ? 's' : ''} •
-          Last scan: {project.scans[0]?.createdAt
-            ? new Date(project.scans[0].createdAt).toLocaleDateString()
+          Last scan: {project.scans[0]?.updatedAt
+            ? new Date(project.scans[0].updatedAt).toLocaleString('en-US', {
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit'
+            })
             : 'Never'}
         </div>
         <Button

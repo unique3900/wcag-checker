@@ -45,34 +45,54 @@ export async function POST(
       )
     }
 
-    // Find or create scans for each URL
-    const scanPromises = project.urls.map(async (urlRecord) => {
-      // Find the latest scan for this URL
-      const existingScan = project.scans.find(scan => scan.url === urlRecord.url)
-      
-      let scanId: string
-      
-      if (existingScan) {
-        // Use existing scan ID for rescan
-        scanId = existingScan.id
-      } else {
-        // Create new scan if none exists
-        const newScan = await prisma.scan.create({
-          data: {
-            projectId: project.id,
-            url: urlRecord.url,
-            status: "pending"
-          }
-        })
-        scanId = newScan.id
-      }
+    // Start a transaction to ensure atomicity
+    const scans = await prisma.$transaction(async (tx) => {
+      // Find or create scans for each URL
+      const scanPromises = project.urls.map(async (urlRecord) => {
+        // Find the latest scan for this URL
+        const existingScan = project.scans.find(scan => scan.url === urlRecord.url)
+        
+        if (existingScan) {
+          // Update existing scan for rescan
+          const updatedScan = await tx.scan.update({
+            where: { id: existingScan.id },
+            data: {
+              status: "pending",
+              startedAt: null,
+              completedAt: null,
+              error: null,
+              totalIssues: null,
+              criticalIssues: null,
+              seriousIssues: null,
+              moderateIssues: null,
+              minorIssues: null,
+              analysisMethod: null
+            }
+          })
+          return updatedScan
+        } else {
+          // Create new scan if none exists
+          return await tx.scan.create({
+            data: {
+              projectId: project.id,
+              url: urlRecord.url,
+              status: "pending"
+            }
+          })
+        }
+      })
 
-      // Trigger scan processing asynchronously with scanId for rescan
-      setTimeout(async () => {
-        try {
+      return await Promise.all(scanPromises)
+    })
+
+    // Trigger scan processing asynchronously
+    setTimeout(async () => {
+      try {
+        for (const scan of scans) {
           const scanData = {
             projectId: project.id,
-            url: urlRecord.url,
+            url: scan.url,
+            scanId: scan.id,
             complianceOptions: project.complianceOptions || {
               wcagLevel: "aa",
               section508: false,
@@ -81,29 +101,23 @@ export async function POST(
             }
           }
           
-          // Add scanId if this is a rescan
-          if (existingScan) {
-            (scanData as any).scanId = scanId
-          }
-          
           await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/scans`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(scanData)
           })
-        } catch (error) {
-          console.error(`Failed to trigger scan for ${urlRecord.url}:`, error)
         }
-      }, 100)
+      } catch (error) {
+        console.error(`Failed to trigger scans:`, error)
+      }
+    }, 100)
 
-      return {
-        id: scanId,
-        url: urlRecord.url,
-        status: existingScan ? 'rescanning' : 'pending'
+    await prisma.project.update({
+      where: { id },
+      data: {
+        updatedAt: new Date()
       }
     })
-
-    const scans = await Promise.all(scanPromises)
 
     return NextResponse.json({ 
       success: true, 

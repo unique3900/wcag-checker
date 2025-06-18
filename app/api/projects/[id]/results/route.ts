@@ -43,12 +43,11 @@ export async function GET(
     // Combine all results from all scans
     const allResults = scans.flatMap(scan => scan.results)
 
-    // Create deduplication map based on (url + message + element + severity)
+    // Create deduplication map based on (url + message + element)
     const deduplicationMap = new Map<string, any>()
     
     allResults.forEach(result => {
-      const key = `${result.url}|${result.message}|${result.element || ''}|${result.severity}`
-      
+      const key = `${result.url}|${result.message}|${result.element || ''}`
       // Keep the most recent result for each unique combination
       if (!deduplicationMap.has(key) || 
           new Date(result.createdAt) > new Date(deduplicationMap.get(key).createdAt)) {

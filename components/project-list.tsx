@@ -6,12 +6,25 @@ import { Pencil, Trash2, ExternalLink, RefreshCw, Save, X, Plus, AlertCircle } f
 import Link from "next/link"
 import { useState } from "react"
 import { toast } from "@/components/ui/use-toast"
+import { cn } from "@/lib/utils"
+import { Badge } from "@/components/ui/badge"
+import { useRouter } from "next/navigation"
 
 interface Project {
   id: string
   name: string
   urls: { url: string }[]
-  scans: { id: string; createdAt: string }[]
+  scans: {
+    id: string
+    createdAt: string
+    updatedAt: string
+    status: string
+    totalIssues: number | null
+    criticalIssues: number | null
+    seriousIssues: number | null
+    moderateIssues: number | null
+    minorIssues: number | null
+  }[]
 }
 
 interface ProjectListProps {
@@ -34,8 +47,9 @@ export function ProjectList({ projects: initialProjects }: ProjectListProps) {
     urls: string[]
   }>({ name: "", urls: [] })
   const [isSaving, setIsSaving] = useState(false)
+  const [isRescanning, setIsRescanning] = useState(false)
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({})
-
+  const router = useRouter() 
   const handleEdit = (project: Project) => {
     setEditingId(project.id)
     setEditData({
@@ -245,6 +259,7 @@ export function ProjectList({ projects: initialProjects }: ProjectListProps) {
   }
 
   const handleRescan = async (id: string) => {
+    setIsRescanning(true)
     const project = projects.find(p => p.id === id)
     try {
       const response = await fetch(`/api/projects/${id}/rescan`, {
@@ -266,185 +281,278 @@ export function ProjectList({ projects: initialProjects }: ProjectListProps) {
         description: error instanceof Error ? error.message : "Failed to start rescan",
         variant: "destructive"
       })
+    } finally {
+      router.refresh()
+      setIsRescanning(false)
+    }
+  }
+
+  const getProjectStatus = (project: Project) => {
+    const latestScan = project.scans[0]
+    console.log(latestScan)
+    if (!latestScan) return { status: 'never', text: 'Never scanned' }
+    
+    if (latestScan.status === 'pending' || latestScan.status === 'in_progress') {
+      return { status: 'scanning', text: 'Scanning in progress...' }
+    }
+    
+    if (latestScan.status === 'failed') {
+      return { status: 'failed', text: 'Last scan failed' }
+    }
+    
+    return { 
+      status: 'completed', 
+      text: `Last scan: ${new Date(latestScan.updatedAt).toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      })}`
+    }
+  }
+
+  const getProjectIssues = (project: Project) => {
+    const latestScan = project.scans[0]
+    if (!latestScan || latestScan.status !== 'completed') {
+      return {
+        total: 0,
+        critical: 0,
+        serious: 0,
+        moderate: 0,
+        minor: 0
+      }
+    }
+
+    return {
+      total: latestScan.totalIssues || 0,
+      critical: latestScan.criticalIssues || 0,
+      serious: latestScan.seriousIssues || 0,
+      moderate: latestScan.moderateIssues || 0,
+      minor: latestScan.minorIssues || 0
     }
   }
 
   return (
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-      {projects.map((project) => (
-        <Card key={project.id} className="flex flex-col">
-          <CardHeader>
-            {editingId === project.id ? (
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Project Name</label>
-                  <Input
-                    value={editData.name}
-                    onChange={(e) => handleNameChange(e.target.value)}
-                    placeholder="Enter project name"
-                    className={`${validationErrors.name ? 'border-red-500 focus:border-red-500' : ''}`}
-                  />
-                  {validationErrors.name && (
-                    <p className="text-sm text-red-600 flex items-center gap-1">
-                      <AlertCircle className="h-3 w-3" />
-                      {validationErrors.name}
-                    </p>
-                  )}
-                </div>
-                
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium">
-                      URLs ({editData.urls.filter(url => url.trim()).length}/{MAX_URLS})
-                    </label>
+      {projects.map((project) => {
+        const projectStatus = getProjectStatus(project)
+        const issues = getProjectIssues(project)
+        
+        return (
+          <Card key={project.id} className="flex flex-col">
+            <CardHeader>
+              {editingId === project.id ? (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Project Name</label>
+                    <Input
+                      value={editData.name}
+                      onChange={(e) => handleNameChange(e.target.value)}
+                      placeholder="Enter project name"
+                      className={`${validationErrors.name ? 'border-red-500 focus:border-red-500' : ''}`}
+                    />
+                    {validationErrors.name && (
+                      <p className="text-sm text-red-600 flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3" />
+                        {validationErrors.name}
+                      </p>
+                    )}
+                  </div>
+                  
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="text-sm font-medium">
+                        URLs ({editData.urls.filter(url => url.trim()).length}/{MAX_URLS})
+                      </label>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleAddUrl}
+                        disabled={editData.urls.length >= MAX_URLS}
+                      >
+                        <Plus className="h-4 w-4 mr-1" />
+                        Add URL
+                      </Button>
+                    </div>
+                    
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {editData.urls.map((url, index) => (
+                        <div key={index} className="space-y-1">
+                          <div className="flex gap-2">
+                            <Input
+                              value={url}
+                              onChange={(e) => handleUrlChange(index, e.target.value)}
+                              placeholder="https://example.com"
+                              className={`flex-1 ${validationErrors.urls?.[index] ? 'border-red-500 focus:border-red-500' : ''}`}
+                            />
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleRemoveUrl(index)}
+                              disabled={editData.urls.length <= 1}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                          {validationErrors.urls?.[index] && (
+                            <p className="text-xs text-red-600 flex items-center gap-1 ml-1">
+                              <AlertCircle className="h-3 w-3" />
+                              {validationErrors.urls[index]}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    
+                    {editData.urls.length >= MAX_URLS && (
+                      <p className="text-xs text-orange-600 flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3" />
+                        Maximum {MAX_URLS} URLs allowed for optimal performance
+                      </p>
+                    )}
+
+                    {validationErrors.general && (
+                      <p className="text-sm text-red-600 flex items-center gap-1">
+                        <AlertCircle className="h-4 w-4" />
+                        {validationErrors.general}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex gap-2">
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={() => handleSave(project.id)}
+                      disabled={isSaving}
+                      className="flex-1"
+                    >
+                      <Save className="h-4 w-4 mr-2" />
+                      {isSaving ? "Saving..." : "Save Changes"}
+                    </Button>
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={handleAddUrl}
-                      disabled={editData.urls.length >= MAX_URLS}
+                      onClick={handleCancel}
+                      disabled={isSaving}
                     >
-                      <Plus className="h-4 w-4 mr-1" />
-                      Add URL
+                      <X className="h-4 w-4 mr-2" />
+                      Cancel
                     </Button>
                   </div>
-                  
-                  <div className="space-y-2 max-h-48 overflow-y-auto">
-                    {editData.urls.map((url, index) => (
-                      <div key={index} className="space-y-1">
-                        <div className="flex gap-2">
-                          <Input
-                            value={url}
-                            onChange={(e) => handleUrlChange(index, e.target.value)}
-                            placeholder="https://example.com"
-                            className={`flex-1 ${validationErrors.urls?.[index] ? 'border-red-500 focus:border-red-500' : ''}`}
-                          />
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleRemoveUrl(index)}
-                            disabled={editData.urls.length <= 1}
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </div>
-                        {validationErrors.urls?.[index] && (
-                          <p className="text-xs text-red-600 flex items-center gap-1 ml-1">
-                            <AlertCircle className="h-3 w-3" />
-                            {validationErrors.urls[index]}
-                          </p>
+                </div>
+              ) : (
+                <>
+                  <CardTitle className="flex items-center justify-between">
+                    <span className="truncate">{project.name}</span>
+                    <div className="flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleEdit(project)}
+                        title="Edit project"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDelete(project.id)}
+                        title="Delete project"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </CardTitle>
+                  <CardDescription>
+                    <div className="flex items-center gap-2">
+                      <span>{project.urls.length} URL{project.urls.length !== 1 ? 's' : ''}</span>
+                      <span>•</span>
+                      <span className={cn(
+                        "flex items-center gap-1",
+                        projectStatus.status === 'scanning' && "text-blue-600",
+                        projectStatus.status === 'failed' && "text-red-600",
+                        projectStatus.status === 'never' && "text-gray-500"
+                      )}>
+                        {projectStatus.status === 'scanning' && (
+                          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600"></div>
+                        )}
+                        {projectStatus.text}
+                      </span>
+                    </div>
+                    {issues.total > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {issues.critical > 0 && (
+                          <Badge variant="destructive" className="bg-red-500">
+                            {issues.critical} Critical
+                          </Badge>
+                        )}
+                        {issues.serious > 0 && (
+                          <Badge variant="destructive" className="bg-orange-500">
+                            {issues.serious} Serious
+                          </Badge>
+                        )}
+                        {issues.moderate > 0 && (
+                          <Badge variant="destructive" className="bg-yellow-500">
+                            {issues.moderate} Moderate
+                          </Badge>
+                        )}
+                        {issues.minor > 0 && (
+                          <Badge variant="destructive" className="bg-blue-500">
+                            {issues.minor} Minor
+                          </Badge>
                         )}
                       </div>
-                    ))}
-                  </div>
-                  
-                  {editData.urls.length >= MAX_URLS && (
-                    <p className="text-xs text-orange-600 flex items-center gap-1">
-                      <AlertCircle className="h-3 w-3" />
-                      Maximum {MAX_URLS} URLs allowed for optimal performance
-                    </p>
-                  )}
+                    )}
+                  </CardDescription>
+                </>
+              )}
+            </CardHeader>
 
-                  {validationErrors.general && (
-                    <p className="text-sm text-red-600 flex items-center gap-1">
-                      <AlertCircle className="h-4 w-4" />
-                      {validationErrors.general}
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex gap-2">
-                  <Button
-                    variant="default"
-                    size="sm"
-                    onClick={() => handleSave(project.id)}
-                    disabled={isSaving}
-                    className="flex-1"
-                  >
-                    <Save className="h-4 w-4 mr-2" />
-                    {isSaving ? "Saving..." : "Save Changes"}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleCancel}
-                    disabled={isSaving}
-                  >
-                    <X className="h-4 w-4 mr-2" />
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            ) : (
+            {editingId !== project.id && (
               <>
-                <CardTitle className="flex items-center justify-between">
-                  <span className="truncate">{project.name}</span>
-                  <div className="flex gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleEdit(project)}
-                      title="Edit project"
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleDelete(project.id)}
-                      title="Delete project"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                <CardContent className="flex-1">
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium text-gray-700">URLs:</h4>
+                    <div className="space-y-1 max-h-32 overflow-y-auto">
+                      {project.urls.map((url, index) => (
+                        <div key={index} className="text-sm text-gray-600 truncate" title={url.url}>
+                          {url.url}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </CardTitle>
-                <CardDescription>
-                  {project.urls.length} URL{project.urls.length !== 1 ? 's' : ''} •
-                  Last scan: {project.scans[0]?.createdAt
-                    ? new Date(project.scans[0].createdAt).toLocaleDateString()
-                    : 'Never'}
-                </CardDescription>
+                </CardContent>
+
+                <CardFooter className="pt-4">
+                  <div className="flex gap-2 w-full">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleRescan(project.id)}
+                      className="flex-1"
+                      disabled={projectStatus.status === 'scanning'}
+                    >
+                      <RefreshCw className={cn(
+                        "h-4 w-4 mr-2",
+                        projectStatus.status === 'scanning' && "animate-spin"
+                      )} />
+                      {projectStatus.status === 'scanning' ? 'Scanning...' : 'Rescan'}
+                    </Button>
+                    <Link href={`/projects/${project.id}`} className="flex-1">
+                      <Button variant="default" size="sm" className="w-full">
+                        <ExternalLink className="h-4 w-4 mr-2" />
+                        View Results
+                      </Button>
+                    </Link>
+                  </div>
+                </CardFooter>
               </>
             )}
-          </CardHeader>
-
-          {editingId !== project.id && (
-            <>
-              <CardContent className="flex-1">
-                <div className="space-y-2">
-                  <h4 className="text-sm font-medium text-gray-700">URLs:</h4>
-                  <div className="space-y-1 max-h-32 overflow-y-auto">
-                    {project.urls.map((url, index) => (
-                      <div key={index} className="text-sm text-gray-600 truncate" title={url.url}>
-                        {url.url}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </CardContent>
-
-              <CardFooter className="pt-4">
-                <div className="flex gap-2 w-full">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleRescan(project.id)}
-                    className="flex-1"
-                  >
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Rescan
-                  </Button>
-                  <Link href={`/projects/${project.id}`} className="flex-1">
-                    <Button variant="default" size="sm" className="w-full">
-                      <ExternalLink className="h-4 w-4 mr-2" />
-                      View Results
-                    </Button>
-                  </Link>
-                </div>
-              </CardFooter>
-            </>
-          )}
-        </Card>
-      ))}
+          </Card>
+        )
+      })}
     </div>
   )
 } 

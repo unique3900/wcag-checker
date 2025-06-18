@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server'
-import { PrismaClient } from '@prisma/client'
-
-const prisma = new PrismaClient()
+import { prisma } from "@/lib/db"
 
 // Function to calculate estimated fix time based on issue count and severity
 function calculateEstimatedTime(
@@ -33,105 +31,86 @@ function calculateEstimatedTime(
 
 export async function GET() {
   try {
-    // Get all projects with their latest completed scans
-    const projects = await prisma.project.findMany({
+    // Get all completed scans with their results
+    const scans = await prisma.scan.findMany({
+      where: {
+        status: 'completed'
+      },
       include: {
-        scans: {
-          where: {
-            status: 'completed'
-          },
-          orderBy: {
-            createdAt: 'desc'
-          },
-          take: 1 // Get only the latest completed scan per project
-        }
+        results: true
       }
     })
 
-    // Calculate overall statistics from scan summary fields
-    let totalIssues = 0
-    let criticalIssues = 0
-    let seriousIssues = 0
-    let moderateIssues = 0
-    let minorIssues = 0
-    let totalScans = 0
-    let lastScanDate: Date | null = null
+    // Calculate total issues by severity
+    const totalIssues = scans.reduce((acc, scan) => acc + (scan.totalIssues || 0), 0)
+    const criticalIssues = scans.reduce((acc, scan) => acc + (scan.criticalIssues || 0), 0)
+    const seriousIssues = scans.reduce((acc, scan) => acc + (scan.seriousIssues || 0), 0)
+    const moderateIssues = scans.reduce((acc, scan) => acc + (scan.moderateIssues || 0), 0)
+    const minorIssues = scans.reduce((acc, scan) => acc + (scan.minorIssues || 0), 0)
 
-    const projectStats = projects.map(project => {
-      const latestScan = project.scans[0] // Get the latest completed scan
-      
-      const projectIssues = {
-        critical: latestScan?.criticalIssues || 0,
-        serious: latestScan?.seriousIssues || 0,
-        moderate: latestScan?.moderateIssues || 0,
-        minor: latestScan?.minorIssues || 0,
-        total: latestScan?.totalIssues || 0
-      }
+    // Get project counts
+    const totalProjects = await prisma.project.count()
+    const totalScans = scans.length
 
-      if (latestScan) {
-        totalScans++
-        
-        // Add to overall totals
-        criticalIssues += projectIssues.critical
-        seriousIssues += projectIssues.serious
-        moderateIssues += projectIssues.moderate
-        minorIssues += projectIssues.minor
-        totalIssues += projectIssues.total
-        
-        if (!lastScanDate || latestScan.createdAt > lastScanDate) {
-          lastScanDate = latestScan.createdAt
-        }
-      }
+    // Calculate average issues per project
+    const averageIssuesPerProject = totalProjects > 0 ? totalIssues / totalProjects : 0
 
-      return {
-        id: project.id,
-        name: project.name,
-        totalIssues: projectIssues.total,
-        criticalIssues: projectIssues.critical,
-        seriousIssues: projectIssues.serious,
-        moderateIssues: projectIssues.moderate,
-        minorIssues: projectIssues.minor,
-        estimatedTime: calculateEstimatedTime(
-          projectIssues.critical,
-          projectIssues.serious,
-          projectIssues.moderate,
-          projectIssues.minor
-        ),
-        lastScan: latestScan ? latestScan.createdAt.toISOString() : null,
-        scanStatus: latestScan?.status || 'no_scans'
+    // Calculate total estimated fix time
+    const totalEstimatedTime = calculateTotalEstimatedTime(scans)
+
+    // Get last scan date
+    const lastScan = await prisma.scan.findFirst({
+      orderBy: {
+        createdAt: 'desc'
       }
     })
 
-    const overview = {
-      totalProjects: projects.length,
+    return NextResponse.json({
+      totalProjects,
       totalScans,
       totalIssues,
       criticalIssues,
       seriousIssues,
       moderateIssues,
       minorIssues,
-      totalEstimatedTime: calculateEstimatedTime(
-        criticalIssues,
-        seriousIssues,
-        moderateIssues,
-        minorIssues
-      ),
-      averageIssuesPerProject: projects.length > 0 ? Math.round(totalIssues / projects.length) : 0,
-      lastScanDate: lastScanDate ? (lastScanDate as Date).toISOString() : null
-    }
-
-    return NextResponse.json({
-      overview,
-      projects: projectStats.sort((a, b) => b.totalIssues - a.totalIssues) // Sort by most issues first
+      totalEstimatedTime,
+      averageIssuesPerProject,
+      lastScanDate: lastScan?.createdAt || null
     })
-
   } catch (error) {
-    console.error('Dashboard stats error:', error)
+    console.error("Error fetching dashboard stats:", error)
     return NextResponse.json(
-      { error: 'Failed to fetch dashboard statistics' },
+      { error: "Failed to fetch dashboard stats" },
       { status: 500 }
     )
-  } finally {
-    await prisma.$disconnect()
   }
+}
+
+function calculateTotalEstimatedTime(scans: any[]): string {
+  const totalMinutes = scans.reduce((acc, scan) => {
+    const scanMinutes = scan.results.reduce((resultAcc: number, result: any) => {
+      const estimatedTime = result.details?.estimatedFixTime || '0m'
+      const minutes = parseEstimatedTime(estimatedTime)
+      return resultAcc + minutes
+    }, 0)
+    return acc + scanMinutes
+  }, 0)
+
+  return formatEstimatedTime(totalMinutes)
+}
+
+function parseEstimatedTime(timeStr: string): number {
+  const hours = timeStr.match(/(\d+)h/) ? parseInt(timeStr.match(/(\d+)h/)![1]) : 0
+  const minutes = timeStr.match(/(\d+)m/) ? parseInt(timeStr.match(/(\d+)m/)![1]) : 0
+  return hours * 60 + minutes
+}
+
+function formatEstimatedTime(totalMinutes: number): string {
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`
+  }
+  return `${minutes}m`
 } 

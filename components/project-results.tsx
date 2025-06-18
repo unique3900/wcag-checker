@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { ResultsTable } from "@/components/results-table"
+import { toast } from "@/components/ui/use-toast"
 
 interface Project {
   id: string
@@ -84,9 +85,10 @@ function estimateFixTime(result: any): string {
 }
 
 export function ProjectResults({ project }: ProjectResultsProps) {
-  const [results, setResults] = useState<any[]>([])
-  const [summary, setSummary] = useState<any>(null)
+  const [results, setResults] = useState<AccessibilityResult[]>([])
+  const [summary, setSummary] = useState<AccessibilitySummary | null>(null)
   const [loading, setLoading] = useState(true)
+  const [isPolling, setIsPolling] = useState(false)
   const [page, setPage] = useState(1)
   const [pageSize] = useState(10)
   const [totalPages, setTotalPages] = useState(1)
@@ -94,12 +96,11 @@ export function ProjectResults({ project }: ProjectResultsProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [severityFilters, setSeverityFilters] = useState<string[]>([])
   const [complianceFilters, setComplianceFilters] = useState<string[]>([])
-  const [isPolling, setIsPolling] = useState(false)
 
   const fetchResults = useCallback(async () => {
     setLoading(true)
     try {
-      const params = new URLSearchParams({
+      const queryParams = new URLSearchParams({
         page: page.toString(),
         pageSize: pageSize.toString(),
         sortBy,
@@ -107,36 +108,21 @@ export function ProjectResults({ project }: ProjectResultsProps) {
         ...(severityFilters.length > 0 && { severityFilters: severityFilters.join(",") }),
         ...(complianceFilters.length > 0 && { complianceFilters: complianceFilters.join(",") })
       })
-      
-      // Use the new combined project results API
-      const response = await fetch(`/api/projects/${project.id}/results?${params}`)
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch results: ${response.statusText}`)
-      }
-      
+
+      const response = await fetch(`/api/projects/${project.id}/results?${queryParams}`)
+      if (!response.ok) throw new Error('Failed to fetch results')
+
       const data = await response.json()
-
-      // Add estimated fix time to each result
-      const resultsWithTime = data.results.map((result: any) => ({
-        ...result,
-        estimatedFixTime: estimateFixTime(result)
-      }))
-
-      setResults(resultsWithTime)
+      setResults(data.results)
       setSummary(data.summary)
       setTotalPages(data.totalPages)
     } catch (error) {
       console.error("Error fetching results:", error)
-      setResults([])
-      setSummary({
-        critical: 0,
-        serious: 0,
-        moderate: 0,
-        minor: 0,
-        total: 0
+      toast({
+        title: "Error",
+        description: "Failed to fetch results",
+        variant: "destructive"
       })
-      setTotalPages(1)
     } finally {
       setLoading(false)
     }
@@ -163,6 +149,7 @@ export function ProjectResults({ project }: ProjectResultsProps) {
   // Polling effect for in-progress scans
   useEffect(() => {
     let pollInterval: NodeJS.Timeout
+    let pollTimeout: NodeJS.Timeout
 
     const startPolling = async () => {
       const hasInProgressScans = await checkForInProgressScans()
@@ -170,6 +157,15 @@ export function ProjectResults({ project }: ProjectResultsProps) {
       if (hasInProgressScans && !isPolling) {
         console.log("Starting polling for in-progress scans...")
         setIsPolling(true)
+        
+        // Set a timeout to stop polling after 5 minutes
+        pollTimeout = setTimeout(() => {
+          console.log("Polling timeout reached, stopping...")
+          setIsPolling(false)
+          if (pollInterval) {
+            clearInterval(pollInterval)
+          }
+        }, 5 * 60 * 1000) // 5 minutes
         
         pollInterval = setInterval(async () => {
           const stillInProgress = await checkForInProgressScans()
@@ -183,6 +179,7 @@ export function ProjectResults({ project }: ProjectResultsProps) {
             setIsPolling(false)
             await fetchResults()
             clearInterval(pollInterval)
+            clearTimeout(pollTimeout)
           }
         }, 3000) // Poll every 3 seconds
       }
@@ -193,6 +190,9 @@ export function ProjectResults({ project }: ProjectResultsProps) {
     return () => {
       if (pollInterval) {
         clearInterval(pollInterval)
+      }
+      if (pollTimeout) {
+        clearTimeout(pollTimeout)
       }
     }
   }, [checkForInProgressScans, fetchResults, isPolling])

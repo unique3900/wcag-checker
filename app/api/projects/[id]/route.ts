@@ -47,46 +47,115 @@ export async function PATCH(
     const { id } = await params
     const { name, urls } = await request.json()
 
-    if (!name) {
-      return NextResponse.json(
-        { error: "Project name is required" },
-        { status: 400 }
-      )
-    }
+    // Start a transaction to ensure atomicity
+    const project = await prisma.$transaction(async (tx) => {
+      // Get current project data
+      const currentProject = await tx.project.findUnique({
+        where: { id },
+        include: {
+          urls: true,
+          scans: {
+            include: {
+              results: true
+            }
+          }
+        }
+      })
 
-    // Enforce URL limit
-    if (urls && Array.isArray(urls) && urls.length > 10) {
-      return NextResponse.json(
-        { error: "Maximum 10 URLs allowed per project for performance reasons" },
-        { status: 400 }
-      )
-    }
-
-    // Update project name
-    const project = await prisma.project.update({
-      where: { id },
-      data: { name },
-      include: {
-        urls: true,
-        scans: true
+      if (!currentProject) {
+        throw new Error("Project not found")
       }
+
+      // If URLs are being updated, handle cleanup
+      if (urls) {
+        // Find URLs to remove
+        const currentUrls = currentProject.urls.map(u => u.url)
+        const urlsToRemove = currentUrls.filter(url => !urls.includes(url))
+
+        if (urlsToRemove.length > 0) {
+          // Find scans for removed URLs
+          const scansToRemove = currentProject.scans.filter(scan => 
+            urlsToRemove.includes(scan.url)
+          )
+
+          // Delete results for these scans
+          if (scansToRemove.length > 0) {
+            await tx.result.deleteMany({
+              where: {
+                scanId: {
+                  in: scansToRemove.map(scan => scan.id)
+                }
+              }
+            })
+          }
+
+          // Delete the scans
+          await tx.scan.deleteMany({
+            where: {
+              id: {
+                in: scansToRemove.map(scan => scan.id)
+              }
+            }
+          })
+
+          // Delete the URLs
+          await tx.url.deleteMany({
+            where: {
+              projectId: id,
+              url: {
+                in: urlsToRemove
+              }
+            }
+          })
+        }
+
+        // Add new URLs
+        const newUrls = urls.filter((url: string) => !currentUrls.includes(url))
+        if (newUrls.length > 0) {
+          await tx.url.createMany({
+            data: newUrls.map((url: string) => ({
+              projectId: id,
+              url
+            }))
+          })
+        }
+      }
+
+      // Update project name if provided
+      if (name) {
+        return await tx.project.update({
+          where: { id },
+          data: { name },
+          include: {
+            urls: true,
+            scans: {
+              orderBy: {
+                createdAt: 'desc'
+              },
+              include: {
+                results: true
+              }
+            }
+          }
+        })
+      }
+
+      // If only URLs were updated, return updated project
+      return await tx.project.findUnique({
+        where: { id },
+        include: {
+          urls: true,
+          scans: {
+            orderBy: {
+              createdAt: 'desc'
+            },
+            include: {
+              results: true
+            }
+          }
+        }
+      })
     })
-
-    // Update URLs if provided
-    if (urls && Array.isArray(urls)) {
-      // Delete existing URLs
-      await prisma.url.deleteMany({
-        where: { projectId: id }
-      })
-
-      // Create new URLs
-      await prisma.url.createMany({
-        data: urls.map((url: string) => ({
-          url,
-          projectId: id
-        }))
-      })
-    }
 
     return NextResponse.json(project)
   } catch (error) {
